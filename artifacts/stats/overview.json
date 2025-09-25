@@ -1,0 +1,30 @@
+{
+  "rows_total": 29802124,
+  "types": [
+    "banks",
+    "households",
+    "insurance_companies",
+    "investment_advisors",
+    "mutual_funds",
+    "other",
+    "pension_funds"
+  ],
+  "processed_dir": "data\\processed\\panel_quarter.parquet",
+  "columns": [
+    "mgrno",
+    "permno",
+    "date",
+    "holding_t",
+    "holding_t1",
+    "factor1",
+    "factor2",
+    "factor3",
+    "factor4",
+    "factor5",
+    "prc",
+    "shares",
+    "type",
+    "aum",
+    "outaum"
+  ]
+}

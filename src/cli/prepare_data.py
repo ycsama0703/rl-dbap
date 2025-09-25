@@ -127,7 +127,8 @@ def main():
 
     print(f"[prepare] load raw from {raw_dir}")
     # 只读可能用到的列（能省内存；若列名不同可在这里扩充）
-    cols = ["mgrno","permno","fdate","holding","me","be","profit","Gat","beta","prc","shares","type","aum"]
+    cols = ["mgrno","permno","fdate","holding","me","be","profit","Gat","beta",
+            "prc","shares","type","aum","outaum"]
     df_raw = load_raw_years(raw_dir, usecols=[c for c in cols if (raw_dir / "dummy").exists() or True])  # 保守：内部会忽略不存在的列
 
     print(f"[prepare] build panel (align={cfg['quarter_where']}, dropna_label={cfg['dropna_label']})")

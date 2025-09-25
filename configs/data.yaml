@@ -1,0 +1,27 @@
+# configs/data.yaml
+
+raw_dir: data/raw                # 存放原始 parquet 文件
+interim_dir: data/interim        # 存放中间结果（可选）
+processed_dir: data/processed/panel_quarter.parquet   # 输出的 parquet 文件
+
+# 下面可选：时间对齐方式
+quarter_where: end    # 可选 "end" 或 "start"
+dropna_label: true    # 是否去掉没有 t+1 标签的数据
+
+
+cols:
+  - mgrno
+  - permno
+  - fdate
+  - holding
+  - me
+  - be
+  - profit
+  - Gat
+  - beta
+  - prc
+  - shares
+  - type
+  - aum
+  - outaum   # ✅ 加上这个
+
