@@ -1,0 +1,23 @@
+# 数据文件
+data/raw/
+data/interim/
+data/processed/
+predictions/
+
+# 大文件
+*.parquet
+*.csv
+*.pkl
+*.h5
+*.pt
+*.bin
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+.venv/
+env/
