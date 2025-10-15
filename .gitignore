@@ -1,0 +1,27 @@
+# Data (ignored)
+data/
+artifacts/
+outputs/
+predictions/
+
+# Keep tiny sample artifacts for docs/demo
+!artifacts/samples/
+!artifacts/samples/**
+
+# Large file patterns
+*.parquet
+*.csv
+*.pkl
+*.h5
+*.pt
+*.bin
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+.venv/
+env/
