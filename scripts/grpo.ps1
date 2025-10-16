@@ -10,7 +10,7 @@ param(
 swift rlhf `
   --rlhf_type grpo `
   --model $Model `
-  --external_plugins ms-swift/examples/train/grpo/plugin/plugin.py `
+  --external_plugins src/plugins/grpo/holdings_plugin.py `
   --reward_funcs contract_holdings external_holdings format `
   --train_type lora `
   --lora_rank 8 `
@@ -36,4 +36,3 @@ swift rlhf `
   --beta 0.04 `
   --log_completions true `
   $(if ($UseVllm) { "--use_vllm true --vllm_mode colocate" })
-
