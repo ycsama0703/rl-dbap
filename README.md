@@ -6,15 +6,36 @@ RL-DBAP: Prompted Holdings Prediction — Quick Guide
 
 环境准备
 - Python 3.10+；数据以 parquet 提供。
-- 安装依赖：
-  - 可选：创建虚拟环境（PowerShell）
-    - `python -m venv .venv`
-    - `./.venv/Scripts/Activate.ps1`
-  - 安装 `requirements.txt`
-    - `pip install -r requirements.txt`
-  - 如需指定 CUDA 版 PyTorch：先按 https://pytorch.org 获取匹配命令安装 `torch`，再执行 `pip install -r requirements.txt`
-  - 如 ms-swift 从 PyPI 安装失败，可改用源码安装：
-    - `pip install git+https://github.com/modelscope/ms-swift.git`
+- 建议使用虚拟环境并按以下步骤安装依赖。
+
+Windows（PowerShell）
+- 创建并激活环境：
+  - `python -m venv .venv`
+  - `./.venv/Scripts/Activate.ps1`
+- 安装 PyTorch（选择与你机器匹配的 CUDA/CPU 版本）：
+  - CUDA 12.1 示例：`pip install --index-url https://download.pytorch.org/whl/cu121 torch torchvision torchaudio`
+  - CPU 环境：`pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio`
+- 安装其余依赖：
+  - `pip install -r requirements.txt`
+- 如 ms-swift 从 PyPI 安装失败，改用源码安装：
+  - `pip install git+https://github.com/modelscope/ms-swift.git`
+
+Linux/macOS（可选）
+- 创建并激活环境：
+  - `python3 -m venv .venv && source .venv/bin/activate`
+- 参照 https://pytorch.org 的命令安装 `torch/torchvision/torchaudio`（匹配 CUDA/CPU），再执行：
+  - `pip install -r requirements.txt`
+- 如需源码安装 ms-swift：
+  - `pip install git+https://github.com/modelscope/ms-swift.git`
+
+快速校验
+- `swift --help` 与 `swift sft --help` 可正常运行。
+- 奖励插件可加载：
+  - `python - << 'PY'
+from swift.plugin.orm import orms
+import src.plugins.grpo.holdings_plugin
+print('contract_holdings' in orms, 'external_holdings' in orms)
+PY`
 
 1) 准备数据（对齐到季度 + 生成标签）
 - 配置：`configs/data.yaml`
@@ -68,16 +89,7 @@ RL-DBAP: Prompted Holdings Prediction — Quick Guide
   - 说明：脚本使用仓库内置插件 `src/plugins/grpo/holdings_plugin.py` 作为 `--external_plugins`，避免依赖 ms-swift 目录下的示例插件。
   - 默认 `--reward_funcs contract_holdings external_holdings format`
 
-6) 奖励函数（ms-swift）
-- `contract_holdings`（格式契约，硬约束，0/1）
-  - 只允许一个 `<answer>...</answer>` 区块，且区块内只含 JSON 对象
-  - 允许两种键之一且仅出现一次：`{"holding_delta": <float>}` 或 `{"holding_tp1": <float>}`；小写键；≤6 小数；禁止科学计数法
-  - 约束：`holding_tp1 ≥ 0`；若提供 `holding_t`，则 `holding_delta ≥ -holding_t`
-- `external_holdings`（数值型复合：量级 + 方向）
-  - 预测/目标解析：优先 `holding_delta`；否则用 `holding_tp1 - holding_t`
-  - 量级奖励：归一化 Huber；方向奖励：sigmoid(signed score)；总奖励加权求和
-
-7) 评估与测试
+6) 评估与测试
 - 生成测试集：
   - `python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_test --date-start 2019-01-01 --use-tqdm`
   - `python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test --out artifacts/sft/test.jsonl`
@@ -87,4 +99,22 @@ RL-DBAP: Prompted Holdings Prediction — Quick Guide
   - GRPO LoRA：`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/grpo_qwen2.5_7b --out_dir artifacts/eval_grpo --post_csv_for_compare artifacts/eval_base/pred_detail.csv`
 - 评测产物：`metrics.csv`（覆盖率、MAE、RMSE、R2、sMAPE%、IC、RankIC、Recall/Precision/NDCG@50）、`pred_detail.csv`、`residual_hist.png`、`ic_by_quarter.png`
 
+一步跑通（从零到评测）
+- 数据准备：`python -m src.cli.prepare_data --config configs/data.yaml`
+- 生成 prompts：
+  - SFT：`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_sft --date-end 2016-12-31`
+  - GRPO：`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_grpo --date-start 2017-01-01 --date-end 2018-12-31`
+  - Test：`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_test --date-start 2019-01-01`
+- 转换：
+  - `python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft --out artifacts/sft/sft_train.jsonl`
+  - `python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo --out artifacts/grpo/grpo.jsonl`
+  - `python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test --out artifacts/sft/test.jsonl`
+- 训练：
+  - `powershell .\scripts\sft.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/sft/sft_train.jsonl" -OutputDir "outputs/sft_qwen2.5_7b"`
+  - `powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512`
+- 评测：
+  - `python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/sft_qwen2.5_7b --out_dir artifacts/eval_sft`
+  - `python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/grpo_qwen2.5_7b --out_dir artifacts/eval_grpo --post_csv_for_compare artifacts/eval_base/pred_detail.csv`
+
 提示：评测解析会优先选取 messages 中 `loss=True` 的 assistant 作为标签/对齐对象，忽略 `<think>`。
+
