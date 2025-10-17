@@ -28,6 +28,27 @@ Linux/macOS（可选）
 - 如需源码安装 ms-swift：
   - `pip install git+https://github.com/modelscope/ms-swift.git`
 
+MS‑SWIFT 固定路径安装（方案 A，推荐）
+- 适用：你在算力平台 clone 本仓库后，`ms-swift` 目录为空或未被同步，且希望以“固定路径 + 开发模式”安装，确保 `swift` 与奖励接口可用。
+- 将环境变量 `REPO_ROOT` 替换为本仓库根目录（例如 `/root/rl-dbap`）。
+
+Linux（bash）
+- 激活你的虚拟环境：
+  - `source /path/to/venv/bin/activate`
+- 删除旧目录（若存在）：
+  - `rm -rf $REPO_ROOT/ms-swift`
+- 以相同路径名重新克隆官方仓库（浅克隆加速）：
+  - `git clone --depth 1 https://github.com/modelscope/ms-swift.git $REPO_ROOT/ms-swift`
+- 开发模式安装：
+  - `pip install -e $REPO_ROOT/ms-swift`
+
+示例（与你的环境一致）
+- 假设仓库在 `/root/rl-dbap`，虚拟环境在 `/workspace/rl-dabp-vastai`：
+  - `source /workspace/rl-dabp-vastai/bin/activate`
+  - `rm -rf /root/rl-dbap/ms-swift`
+  - `git clone --depth 1 https://github.com/modelscope/ms-swift.git /root/rl-dbap/ms-swift`
+  - `pip install -e /root/rl-dbap/ms-swift`
+
 快速校验
 - `swift --help` 与 `swift sft --help` 可正常运行。
 - 奖励插件可加载：
@@ -36,6 +57,31 @@ from swift.plugin.orm import orms
 import src.plugins.grpo.holdings_plugin
 print('contract_holdings' in orms, 'external_holdings' in orms)
 PY`
+
+基础模型下载与配置
+- 在线环境：首次运行会自动从 Hugging Face 下载基础模型（如 `Qwen/Qwen2.5-7B-Instruct`），无需额外操作。
+- 离线/受限环境：建议提前拉取并本地化，训练与评测均可直接指向本地目录。
+
+Windows（PowerShell）
+- 安装 CLI：`pip install "huggingface_hub[cli]"`（一次即可）
+- 登录（如需私有/受限下载）：`huggingface-cli login`
+- 下载到本地目录（示例）：
+  - `huggingface-cli download Qwen/Qwen2.5-7B-Instruct --local-dir models/Qwen2.5-7B-Instruct --local-dir-use-symlinks False`
+- 训练/评测时改为使用本地路径：
+  - SFT：`powershell .\scripts\sft.ps1 -Model ".\models\Qwen2.5-7B-Instruct" -Dataset "artifacts/sft/sft_train.jsonl" -OutputDir "outputs/sft_qwen2.5_7b"`
+  - GRPO：`powershell .\scripts\grpo.ps1 -Model ".\models\Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512`
+  - 评测：`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model .\models\Qwen2.5-7B-Instruct --lora_path outputs/sft_qwen2.5_7b --out_dir artifacts/eval_sft`
+
+Linux/macOS（bash）
+- `pip install "huggingface_hub[cli]"`
+- `huggingface-cli login`（如需）
+- `huggingface-cli download Qwen/Qwen2.5-7B-Instruct --local-dir models/Qwen2.5-7B-Instruct --local-dir-use-symlinks False`
+- 训练/评测命令中的 `-Model/--base_model` 改为 `./models/Qwen2.5-7B-Instruct`
+
+可选：统一缓存目录
+- 设置缓存路径，避免多次下载与便于迁移：
+  - Windows：`$env:HF_HOME="D:/hf-cache"`; `pip cache dir` 查看缓存
+  - Linux：`export HF_HOME=/data/hf-cache`
 
 1) 准备数据（对齐到季度 + 生成标签）
 - 配置：`configs/data.yaml`
@@ -117,4 +163,3 @@ PY`
   - `python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/grpo_qwen2.5_7b --out_dir artifacts/eval_grpo --post_csv_for_compare artifacts/eval_base/pred_detail.csv`
 
 提示：评测解析会优先选取 messages 中 `loss=True` 的 assistant 作为标签/对齐对象，忽略 `<think>`。
-
