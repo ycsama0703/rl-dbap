@@ -1,4 +1,4 @@
-RL-DBAP: Prompted Holdings Prediction — Quick Guide
+﻿RL-DBAP: Prompted Holdings Prediction — Quick Guide
 
 概览
 - 目标：把季度持仓面板数据转成“历史窗口型”Prompts，完成 SFT 热身、GRPO 强化训练，并评估 MAE/IC 等指标。
@@ -16,9 +16,9 @@ RL-DBAP: Prompted Holdings Prediction — Quick Guide
 - 可选：ms-swift 源码/固定路径安装
   - 源码安装：`pip install git+https://github.com/modelscope/ms-swift.git`
   - 固定路径安装：
-    - `rm -rf ./ms-swift`
-    - `git clone --depth 1 https://github.com/modelscope/ms-swift.git ./ms-swift`
-    - `pip install -e ./ms-swift`
+    - `cd /workspace/rl-dbap` 改成你自己的路径
+    - `rm -rf ./ms-swift` 删掉原始空文件夹
+    - `git clone https://github.com/modelscope/ms-swift.git ms-swift` 直接clone就行
 - 可选：提前下载基础模型（离线/限网时）
   - `pip install "huggingface_hub[cli]"`
   - `huggingface-cli download Qwen/Qwen2.5-7B-Instruct --local-dir models/Qwen2.5-7B-Instruct --local-dir-use-symlinks False`
@@ -83,6 +83,17 @@ RL-DBAP: Prompted Holdings Prediction — Quick Guide
 
 提示
 - 评测解析优先选取 messages 中 `loss=True` 的 assistant 作为标签/对齐对象，忽略 `<think>`。
+
+训练（Python 执行 与 .sh 启动）
+- Python 执行（SFT）：
+  - `python -m swift.cli.sft --model "Qwen/Qwen2.5-7B-Instruct" --train_type lora --dataset artifacts/sft/sft_train.jsonl --torch_dtype bfloat16 --num_train_epochs 1 --per_device_train_batch_size 1 --gradient_accumulation_steps 16 --learning_rate 1e-4 --lora_rank 8 --lora_alpha 32 --target_modules all-linear --logging_steps 20 --save_steps 500 --save_total_limit 2 --max_length 2048 --output_dir outputs/sft_qwen2.5_7b --system "You are a quantitative portfolio manager. Respond with valid JSON only."`
+- Python 执行（GRPO）：
+  - `python -m swift.cli.rlhf --rlhf_type grpo --model "Qwen/Qwen2.5-7B-Instruct" --external_plugins src/plugins/grpo/holdings_plugin.py --reward_funcs contract_holdings external_holdings format --train_type lora --lora_rank 8 --lora_alpha 32 --target_modules all-linear --torch_dtype bfloat16 --dataset artifacts/grpo/grpo.jsonl --load_from_cache_file true --max_completion_length 512 --num_train_epochs 1 --per_device_train_batch_size 1 --learning_rate 1e-6 --gradient_accumulation_steps 8 --logging_steps 5 --save_steps 100 --save_total_limit 2 --max_length 2048 --output_dir outputs/grpo_qwen2.5_7b --warmup_ratio 0.05 --dataset_num_proc 2 --num_generations 4 --temperature 0.9 --beta 0.04 --log_completions true`
+- Linux/macOS（.sh 启动）：
+  - SFT：`bash scripts/sft.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/sft/sft_train.jsonl -o outputs/sft_qwen2.5_7b`
+  - GRPO：`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512`（加 `-v` 启用 vLLM colocate）
+  - macOS 若无 `bash` 可改用 `zsh` 执行上述命令。
+~- Windows（PowerShell）：保持使用现有 `.ps1` 脚本 `scripts/sft.ps1` 与 `scripts/grpo.ps1`。
 
 附录与完整说明
 - 原始完整记录（包含更详细的动机、参数、奖励定义与命令清单）保存在仓库文件：`_RESTORE_README.md`。本 README 仅做结构化整理与快速上手，未删除任何历史信息。
