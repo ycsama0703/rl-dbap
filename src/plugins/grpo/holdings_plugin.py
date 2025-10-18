@@ -16,19 +16,42 @@ def _extract_answer_body(text: str) -> str | None:
 
 
 def _extract_json_from_answer(text: str):
-    body = _extract_answer_body(text)
-    if body is None:
-        return None
-    try:
-        return json.loads(body)
-    except Exception:
+    """Try to extract a JSON object either from <answer>...</answer> or anywhere in text.
+
+    This makes the reward robust when the model does not emit <answer> tags yet.
+    """
+    def _try_load(s: str):
         try:
-            start = body.find("{")
-            end = body.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                return json.loads(body[start:end + 1])
+            return json.loads(s)
         except Exception:
             return None
+
+    # 1) Prefer content inside <answer> tags
+    body = _extract_answer_body(text)
+    candidates: list[str] = []
+    if isinstance(body, str) and body:
+        # strip surrounding code fences if present
+        cleaned = re.sub(r"^```[a-zA-Z0-9]*\n|```$", "", body.strip())
+        candidates.append(cleaned)
+        # substring between first { and last }
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidates.append(cleaned[start:end + 1])
+
+    # 2) Fallback: search whole completion
+    whole = text or ""
+    whole_cleaned = re.sub(r"^```[a-zA-Z0-9]*\n|```$", "", whole.strip())
+    start2 = whole_cleaned.find("{")
+    end2 = whole_cleaned.rfind("}")
+    if start2 != -1 and end2 != -1 and end2 > start2:
+        candidates.append(whole_cleaned[start2:end2 + 1])
+
+    # Try load in order
+    for s in candidates:
+        obj = _try_load(s)
+        if isinstance(obj, dict):
+            return obj
     return None
 
 
@@ -51,10 +74,8 @@ class ContractHoldingsORM(ORM):
             holding_t = [holding_t] * len(completions)
         for comp, ht in zip(completions, holding_t):
             try:
-                body = _extract_answer_body(comp)
-                if body is None:
-                    rewards.append(0.0)
-                    continue
+                # Accept values inside <answer> or anywhere in completion as fallback
+                body = _extract_answer_body(comp) or comp or ""
 
                 m = self._DELTA_SEARCH.search(body)
                 if m:
@@ -221,4 +242,3 @@ class HoldingsDeltaORM(ORM):
 # register names for --reward_funcs
 orms['external_holdings'] = HoldingsDeltaORM
 orms['contract_holdings'] = ContractHoldingsORM
-

@@ -84,6 +84,22 @@
 提示
 - 评测解析优先选取 messages 中 `loss=True` 的 assistant 作为标签/对齐对象，忽略 `<think>`。
 
+一条命令：按投资者类型 SFT+GRPO 管道
+- Linux/macOS：
+  - `bash scripts/run_per_type.sh -t banks -m "Qwen/Qwen2.5-7B-Instruct" -sft_end 2016-12-31 -grpo_start 2017-01-01 -grpo_end 2018-12-31 -g 4 -l 512`
+  - 自动执行：构建 per‑type SFT prompts → 转 SFT jsonl → 运行 SFT；构建 per‑type GRPO prompts → 转 GRPO jsonl → 以 SFT 适配器为起点运行 GRPO。
+- Windows/PowerShell：
+  - `powershell .\scripts\run_per_type.ps1 -Type banks -Model "Qwen/Qwen2.5-7B-Instruct" -SftEnd "2016-12-31" -GrpoStart "2017-01-01" -GrpoEnd "2018-12-31" -NumGenerations 4 -MaxCompletionLen 512`
+  - 同样串联执行 per‑type 的 SFT 与 GRPO。
+
+最简训练（仅训练，数据已备）
+- 场景：已存在 per‑type 的 SFT 与 GRPO 数据集（如 `artifacts/sft/sft_train_banks.jsonl`、`artifacts/grpo/grpo_banks.jsonl`）。
+- Linux/macOS：
+  - `bash scripts/train_per_type.sh -t banks -m "Qwen/Qwen2.5-7B-Instruct"`
+- Windows/PowerShell：
+  - `powershell .\scripts\train_per_type.ps1 -Type banks -Model "Qwen/Qwen2.5-7B-Instruct"`
+- 说明：脚本默认读取 `artifacts/sft/sft_train_<TYPE>.jsonl` 与 `artifacts/grpo/grpo_<TYPE>.jsonl`，先运行 SFT 输出到 `outputs/sft_<TYPE>`，随后以该 SFT 适配器为起点运行 GRPO，输出到 `outputs/grpo_<TYPE>`。
+
 GRPO 承接 SFT 与断点续训（补充）
 - 从 SFT LoRA 继续做 GRPO：
   - PowerShell：`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512 -Adapters "outputs/sft_qwen2.5_7b"`
