@@ -84,14 +84,45 @@
 提示
 - 评测解析优先选取 messages 中 `loss=True` 的 assistant 作为标签/对齐对象，忽略 `<think>`。
 
+GRPO 承接 SFT 与断点续训（补充）
+- 从 SFT LoRA 继续做 GRPO：
+  - PowerShell：`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512 -Adapters "outputs/sft_qwen2.5_7b"`
+  - Bash：`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512 -a outputs/sft_qwen2.5_7b`
+- GRPO 断点续训：
+  - PowerShell：`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512 -ResumeFrom "outputs/grpo_qwen2.5_7b/checkpoint-1000"`
+  - Bash：`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512 -r outputs/grpo_qwen2.5_7b/checkpoint-1000`
+
+按投资者类型（per‑type）训练
+- 场景：希望捕捉不同投资者类型的差异，每次训练仅使用单一类型的数据（SFT 与 GRPO 皆可）。
+- 步骤（以 `banks` 为例）：
+  1) 只为该类型生成 prompts（按需切分时间）
+     - SFT：`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_sft --include-types banks --date-end 2016-12-31`
+     - GRPO：`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_grpo --include-types banks --date-start 2017-01-01 --date-end 2018-12-31`
+  2) 仅转换该类型的 jsonl 为训练集
+     - SFT：`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft/banks.jsonl --out artifacts/sft/sft_train_banks.jsonl`
+     - GRPO：`python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo/banks.jsonl --out artifacts/grpo/grpo_banks.jsonl`
+  3) 使用 per‑type 数据启动训练
+     - Windows/PS（SFT）：`powershell .\scripts\sft.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/sft/sft_train_banks.jsonl" -OutputDir "outputs/sft_banks"`
+     - Windows/PS（GRPO）：`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo_banks.jsonl" -OutputDir "outputs/grpo_banks" -NumGenerations 4 -MaxCompletionLen 512`
+     - Linux/macOS（SFT）：`bash scripts/sft.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/sft/sft_train_banks.jsonl -o outputs/sft_banks`
+     - Linux/macOS（GRPO）：`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo_banks.jsonl -o outputs/grpo_banks -g 4 -l 512`
+  4) 按类型评测（可选，仅 banks）
+     - 生成测试集（仅 banks）：`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_test_banks --include-types banks --date-start 2019-01-01`
+     - 转换：`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test_banks/banks.jsonl --out artifacts/sft/test_banks.jsonl`
+     - 评测：`python -m src.cli.run_eval --test_path artifacts/sft/test_banks.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/sft_banks --out_dir artifacts/eval_sft_banks`
+
+说明
+- `--include-types` 接受以逗号分隔的文件名 stem（如 `banks,mutual_funds`）；单类型时仅填一个。
+- 转换阶段如果 `--in` 指向目录，会合并目录内全部 jsonl；因此做 per‑type 训练时，务必把 `--in` 指向单个类型的 jsonl 文件路径。
+
 训练（Python 执行 与 .sh 启动）
 - Python 执行（SFT）：
   - `python -m swift.cli.sft --model "Qwen/Qwen2.5-7B-Instruct" --train_type lora --dataset artifacts/sft/sft_train.jsonl --torch_dtype bfloat16 --num_train_epochs 1 --per_device_train_batch_size 1 --gradient_accumulation_steps 16 --learning_rate 1e-4 --lora_rank 8 --lora_alpha 32 --target_modules all-linear --logging_steps 20 --save_steps 500 --save_total_limit 2 --max_length 2048 --output_dir outputs/sft_qwen2.5_7b --system "You are a quantitative portfolio manager. Respond with valid JSON only."`
 - Python 执行（GRPO）：
   - `python -m swift.cli.rlhf --rlhf_type grpo --model "Qwen/Qwen2.5-7B-Instruct" --external_plugins src/plugins/grpo/holdings_plugin.py --reward_funcs contract_holdings external_holdings format --train_type lora --lora_rank 8 --lora_alpha 32 --target_modules all-linear --torch_dtype bfloat16 --dataset artifacts/grpo/grpo.jsonl --load_from_cache_file true --max_completion_length 512 --num_train_epochs 1 --per_device_train_batch_size 1 --learning_rate 1e-6 --gradient_accumulation_steps 8 --logging_steps 5 --save_steps 100 --save_total_limit 2 --max_length 2048 --output_dir outputs/grpo_qwen2.5_7b --warmup_ratio 0.05 --dataset_num_proc 2 --num_generations 4 --temperature 0.9 --beta 0.04 --log_completions true`
 - Linux/macOS（.sh 启动）：
-  - SFT：`bash scripts/sft.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/sft/sft_train.jsonl -o outputs/sft_qwen2.5_7b`
-  - GRPO：`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512`（加 `-v` 启用 vLLM colocate）
+  - SFT：`bash scripts/sft.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/sft/sft_train_banks.jsonl -o outputs/sft_qwen2.5_7b`
+  - GRPO：`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo_banks.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512`（加 `-v` 启用 vLLM colocate）
   - macOS 若无 `bash` 可改用 `zsh` 执行上述命令。
 ~- Windows（PowerShell）：保持使用现有 `.ps1` 脚本 `scripts/sft.ps1` 与 `scripts/grpo.ps1`。
 

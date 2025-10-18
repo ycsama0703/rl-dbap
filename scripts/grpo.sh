@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: bash scripts/grpo.sh -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR> [-g <NUM_GENERATIONS>] [-l <MAX_COMPLETION_LEN>] [-v]
+# Usage: bash scripts/grpo.sh -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR> \
+#        [-a <SFT_ADAPTER_DIR>] [-g <NUM_GENERATIONS>] [-l <MAX_COMPLETION_LEN>] [-r <CKPT_DIR>] [-v]
+#   -a: initialize from existing SFT LoRA adapters (e.g., outputs/sft_*)
+#   -r: resume GRPO from a checkpoint dir (e.g., outputs/grpo_*/checkpoint-1000)
 #   -v: use vLLM colocate mode
 
 MODEL="Qwen/Qwen2.5-7B-Instruct"
@@ -10,22 +13,47 @@ OUTPUT_DIR="outputs/grpo_qwen2.5_7b"
 NUM_GENERATIONS=4
 MAX_COMPLETION_LEN=512
 USE_VLLM=0
+ADAPTERS=""
+RESUME_FROM=""
 
-while getopts ":m:d:o:g:l:v" opt; do
+while getopts ":m:d:o:g:l:a:r:v" opt; do
   case ${opt} in
     m) MODEL="$OPTARG" ;;
     d) DATASET="$OPTARG" ;;
     o) OUTPUT_DIR="$OPTARG" ;;
     g) NUM_GENERATIONS="$OPTARG" ;;
     l) MAX_COMPLETION_LEN="$OPTARG" ;;
+    a) ADAPTERS="$OPTARG" ;;
+    r) RESUME_FROM="$OPTARG" ;;
     v) USE_VLLM=1 ;;
-    *) echo "Usage: $0 -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR> [-g <NUM_GENERATIONS>] [-l <MAX_COMPLETION_LEN>] [-v]" ; exit 1 ;;
+    *) echo "Usage: $0 -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR> [-a <SFT_ADAPTER_DIR>] [-g <NUM_GENERATIONS>] [-l <MAX_COMPLETION_LEN>] [-r <CKPT_DIR>] [-v]" ; exit 1 ;;
   esac
 done
 
 EXTRA_VLLM_ARGS=()
 if [[ "$USE_VLLM" == "1" ]]; then
   EXTRA_VLLM_ARGS+=(--use_vllm true --vllm_mode colocate)
+fi
+
+ADAPTER_ARGS=()
+if [[ -n "$ADAPTERS" ]]; then
+  ADAPTER_ARGS+=(--adapters "$ADAPTERS")
+fi
+
+RESUME_ARGS=()
+if [[ -n "$RESUME_FROM" ]]; then
+  RESUME_ARGS+=(--resume_from_checkpoint "$RESUME_FROM")
+fi
+
+# Auto-detect latest checkpoint if none provided and output dir has checkpoints
+if [[ -z "$RESUME_FROM" ]]; then
+  latest_ckpt=""
+  if compgen -G "${OUTPUT_DIR}/checkpoint-*" > /dev/null; then
+    latest_ckpt=$(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sed -E 's/.*checkpoint-([0-9]+)/\1 \0/' | sort -k1,1n | awk '{print $2}' | tail -1)
+  fi
+  if [[ -n "$latest_ckpt" ]]; then
+    RESUME_ARGS=(--resume_from_checkpoint "$latest_ckpt")
+  fi
 fi
 
 swift rlhf \
@@ -56,5 +84,6 @@ swift rlhf \
   --temperature 0.9 \
   --beta 0.04 \
   --log_completions true \
-  "${EXTRA_VLLM_ARGS[@]}"
-
+  "${EXTRA_VLLM_ARGS[@]}" \
+  "${ADAPTER_ARGS[@]}" \
+  "${RESUME_ARGS[@]}"

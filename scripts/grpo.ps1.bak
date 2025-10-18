@@ -8,19 +8,7 @@ param(
   [string]$Adapters = "",
   [string]$ResumeFrom = ""
 )
-
-# Auto-detect latest checkpoint if -ResumeFrom not provided
-if (-not $ResumeFrom -and (Test-Path $OutputDir)) {
-  $ckpts = Get-ChildItem -Path $OutputDir -Directory -Filter "checkpoint-*" | ForEach-Object {
-    $m = [regex]::Match($_.Name, 'checkpoint-(\d+)');
-    if ($m.Success) { [pscustomobject]@{ Path = $_.FullName; Step = [int]$m.Groups[1].Value } }
-  } | Sort-Object Step
-  if ($ckpts -and $ckpts.Count -gt 0) {
-    $ResumeFrom = $ckpts[-1].Path
-  }
-}
-
-swift rlhf `
+$insertion`nswift rlhf `
   --rlhf_type grpo `
   --model $Model `
   --external_plugins src/plugins/grpo/holdings_plugin.py `
@@ -50,4 +38,5 @@ swift rlhf `
   --log_completions true `
   $(if ($Adapters -ne "") { "--adapters `"$Adapters`"" }) `
   $(if ($ResumeFrom -ne "") { "--resume_from_checkpoint `"$ResumeFrom`"" }) `
-  $(if ($UseVllm) { "--use_vllm true --vllm_mode colocate" })
+$(if ($UseVllm) { "--use_vllm true --vllm_mode colocate" })
+
