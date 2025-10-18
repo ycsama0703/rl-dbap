@@ -145,3 +145,13 @@ GRPO 承接 SFT 与断点续训（补充）
 附录与完整说明
 - 原始完整记录（包含更详细的动机、参数、奖励定义与命令清单）保存在仓库文件：`_RESTORE_README.md`。本 README 仅做结构化整理与快速上手，未删除任何历史信息。
 - 如需我将 `_RESTORE_README.md` 的内容直接合并进本 README 作为“详细版”章节，请告知，我会无损合并并保留所有原段落。
+Manual Reward Scoring
+- Manually inspect reward scores for sampled completions aligned with the GRPO dataset:
+- `python -m src.cli.score_rewards \
+  `  --dataset artifacts/grpo/grpo_banks.jsonl \
+  `  --completions outputs/grpo_qwen2.5_7b/v1-20251018-073116/completions.jsonl \
+  `  --external_plugins src/plugins/grpo/holdings_plugin.py \
+  `  --reward_funcs contract_holdings external_holdings format \
+  `  --completion_field completion.0 \
+  `  --limit 5`
+- Notes: `--completion_field completion.0` selects the first sampled completion when the completions JSONL stores a list. Add `--strict_answer_only` to score only the <answer>...</answer> body. Adjust the completions path to your actual run directory.
