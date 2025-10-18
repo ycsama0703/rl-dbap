@@ -6,7 +6,12 @@ param(
   [int]$MaxCompletionLen = 512,
   [switch]$UseVllm,
   [string]$Adapters = "",
-  [string]$ResumeFrom = ""
+  [string]$ResumeFrom = "",
+  # New: make rewards configurable (defaults keep backward compatibility)
+  [string[]]$RewardFuncs = @("contract_holdings","external_holdings","format"),
+  [double[]]$RewardWeights = @(),
+  [string]$StopWords = "",
+  [double]$Temperature = 0.9
 )
 
 # Auto-detect latest checkpoint if -ResumeFrom not provided
@@ -24,7 +29,7 @@ swift rlhf `
   --rlhf_type grpo `
   --model $Model `
   --external_plugins src/plugins/grpo/holdings_plugin.py `
-  --reward_funcs contract_holdings external_holdings format `
+  --reward_funcs $RewardFuncs `
   --train_type lora `
   --lora_rank 8 `
   --lora_alpha 32 `
@@ -45,9 +50,11 @@ swift rlhf `
   --warmup_ratio 0.05 `
   --dataset_num_proc 2 `
   --num_generations $NumGenerations `
-  --temperature 0.9 `
+  --temperature $Temperature `
   --beta 0.04 `
   --log_completions true `
+  $(if ($RewardWeights.Count -gt 0) { "--reward_weights $($(($RewardWeights) -join ' '))" }) `
+  $(if ($StopWords -ne "") { "--stop_words `"$StopWords`"" }) `
   $(if ($Adapters -ne "") { "--adapters `"$Adapters`"" }) `
   $(if ($ResumeFrom -ne "") { "--resume_from_checkpoint `"$ResumeFrom`"" }) `
   $(if ($UseVllm) { "--use_vllm true --vllm_mode colocate" })

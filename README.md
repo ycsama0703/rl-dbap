@@ -155,3 +155,14 @@ Manual Reward Scoring
   `  --completion_field completion.0 \
   `  --limit 5`
 - Notes: `--completion_field completion.0` selects the first sampled completion when the completions JSONL stores a list. Add `--strict_answer_only` to score only the <answer>...</answer> body. Adjust the completions path to your actual run directory.
+
+数值优先的 GRPO 训练
+- 目标：让 HoldingsDeltaORM（数值精度）主导优化，ContractHoldingsORM 仅作格式/边界兜底。
+- PowerShell（Windows）：
+  - `powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 6 -MaxCompletionLen 96 -RewardFuncs contract_holdings,external_holdings -RewardWeights 0.1,1.0 -Temperature 0.3 -StopWords "}"`
+- Bash（Linux/macOS）：
+  - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -F "contract_holdings external_holdings" -W "0.1 1.0" -T 0.3 -S "}"`
+- 提示：
+  - `-F/RewardFuncs` 与 `-W/RewardWeights` 顺序一一对应；若保留 `format` 但不想影响数值优化，可将对应权重设为 0。
+  - 纯 JSON 输出建议 `-S/--StopWords '}'`；若使用 XML 两区块，改为 `'</answer>'` 并保持数据模板一致。
+  - 温度建议 0.3–0.6，避免冗长输出；`MaxCompletionLen` 设定为能完整容纳 JSON 的最小足够长度以减少截断。
