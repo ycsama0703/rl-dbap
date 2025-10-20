@@ -166,3 +166,16 @@ Manual Reward Scoring
   - `-F/RewardFuncs` 与 `-W/RewardWeights` 顺序一一对应；若保留 `format` 但不想影响数值优化，可将对应权重设为 0。
   - 纯 JSON 输出建议 `-S/--StopWords '}'`；若使用 XML 两区块，改为 `'</answer>'` 并保持数据模板一致。
   - 温度建议 0.3–0.6，避免冗长输出；`MaxCompletionLen` 设定为能完整容纳 JSON 的最小足够长度以减少截断。
+
+在 SFT 基础上热启动 / 从 GRPO 断点续训
+- Bash（Linux/macOS）：
+  - 基于已有 SFT LoRA 继续（请替换 `<SFT_ADAPTER_DIR>` 为你的 SFT 适配器目录，例如 `outputs/sft_qwen2.5_7b`）
+    - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -F "contract_holdings external_holdings" -W "0.1 1.0" -T 0.3 -S "}" -a <SFT_ADAPTER_DIR>`
+  - 从已有 GRPO 检查点继续（请替换 `<GRPO_CKPT_DIR>` 为你的断点路径，例如 `outputs/grpo_qwen2.5_7b/checkpoint-1000`）
+    - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -F "contract_holdings external_holdings" -W "0.1 1.0" -T 0.3 -S "}" -r <GRPO_CKPT_DIR>`
+  - 说明：如未显式传入 `-r`，脚本会在输出目录中自动检测最新的 `checkpoint-*` 作为断点。
+- PowerShell（Windows）：
+  - 基于 SFT LoRA：
+    - `powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 6 -MaxCompletionLen 96 -RewardFuncs contract_holdings,external_holdings -RewardWeights 0.1,1.0 -Temperature 0.3 -StopWords "}" -Adapters <SFT_ADAPTER_DIR>`
+  - 断点续训：
+    - `powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 6 -MaxCompletionLen 96 -RewardFuncs contract_holdings,external_holdings -RewardWeights 0.1,1.0 -Temperature 0.3 -StopWords "}" -ResumeFrom <GRPO_CKPT_DIR>`
