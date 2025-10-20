@@ -67,7 +67,7 @@
 
 训练与评估（细化）
 - SFT（LoRA）：见上文“一步跑通”。
-- GRPO（LoRA）：奖励函数使用 `contract_holdings external_holdings format`，外部插件路径为仓库内置 `src/plugins/grpo/holdings_plugin.py`。
+- GRPO（LoRA）：默认奖励为 `mse_holdings`（纯 MSE），外部插件路径为仓库内置 `src/plugins/grpo/holdings_plugin.py`。
 - 评估产物：`metrics.csv`、`pred_detail.csv`、`residual_hist.png`、`ic_by_quarter.png`。
 
 模块职责一览
@@ -77,7 +77,7 @@
 - `src/prompts/builder.py`：严格模板 prompt 拼装、十进制格式、输出契约
 - `src/cli/prompts_to_sft.py`：将 prompts 转为 SFT chat 格式（可选 `<think>` 不计损）
 - `src/cli/prompts_to_grpo.py`：将 prompts 转为 GRPO 数据（messages + labels）
-- `src/plugins/grpo/holdings_plugin.py`：自定义奖励（`contract_holdings`、`external_holdings`）
+- `src/plugins/grpo/holdings_plugin.py`：自定义奖励（`mse_holdings`、`contract_holdings`、`external_holdings`）
 - `scripts/sft.ps1`、`scripts/grpo.ps1`：训练脚本（ms‑swift CLI）
 - `src/cli/run_eval.py`、`src/backends/hf_infer.py`：评测与推理
 
@@ -135,7 +135,7 @@ GRPO 承接 SFT 与断点续训（补充）
 - Python 执行（SFT）：
   - `python -m swift.cli.sft --model "Qwen/Qwen2.5-7B-Instruct" --train_type lora --dataset artifacts/sft/sft_train.jsonl --torch_dtype bfloat16 --num_train_epochs 1 --per_device_train_batch_size 1 --gradient_accumulation_steps 16 --learning_rate 1e-4 --lora_rank 8 --lora_alpha 32 --target_modules all-linear --logging_steps 20 --save_steps 500 --save_total_limit 2 --max_length 2048 --output_dir outputs/sft_qwen2.5_7b --system "You are a quantitative portfolio manager. Respond with valid JSON only."`
 - Python 执行（GRPO）：
-  - `python -m swift.cli.rlhf --rlhf_type grpo --model "Qwen/Qwen2.5-7B-Instruct" --external_plugins src/plugins/grpo/holdings_plugin.py --reward_funcs contract_holdings external_holdings format --train_type lora --lora_rank 8 --lora_alpha 32 --target_modules all-linear --torch_dtype bfloat16 --dataset artifacts/grpo/grpo.jsonl --load_from_cache_file true --max_completion_length 512 --num_train_epochs 1 --per_device_train_batch_size 1 --learning_rate 1e-6 --gradient_accumulation_steps 8 --logging_steps 5 --save_steps 100 --save_total_limit 2 --max_length 2048 --output_dir outputs/grpo_qwen2.5_7b --warmup_ratio 0.05 --dataset_num_proc 2 --num_generations 4 --temperature 0.9 --beta 0.04 --log_completions true`
+- `python -m swift.cli.rlhf --rlhf_type grpo --model "Qwen/Qwen2.5-7B-Instruct" --external_plugins src/plugins/grpo/holdings_plugin.py --reward_funcs mse_holdings --train_type lora --lora_rank 8 --lora_alpha 32 --target_modules all-linear --torch_dtype bfloat16 --dataset artifacts/grpo/grpo.jsonl --load_from_cache_file true --max_completion_length 512 --num_train_epochs 1 --per_device_train_batch_size 1 --learning_rate 1e-6 --gradient_accumulation_steps 8 --logging_steps 5 --save_steps 100 --save_total_limit 2 --max_length 2048 --output_dir outputs/grpo_qwen2.5_7b --warmup_ratio 0.05 --dataset_num_proc 2 --num_generations 4 --temperature 0.9 --beta 0.04 --log_completions true`
 - Linux/macOS（.sh 启动）：
   - SFT：`bash scripts/sft.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/sft/sft_train_banks.jsonl -o outputs/sft_qwen2.5_7b`
   - GRPO：`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo_banks.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512`（加 `-v` 启用 vLLM colocate）
@@ -151,7 +151,7 @@ Manual Reward Scoring
   `  --dataset artifacts/grpo/grpo_banks.jsonl \
   `  --completions outputs/grpo_qwen2.5_7b/v1-20251018-073116/completions.jsonl \
   `  --external_plugins src/plugins/grpo/holdings_plugin.py \
-  `  --reward_funcs contract_holdings external_holdings format \
+  `  --reward_funcs mse_holdings \
   `  --completion_field completion.0 \
   `  --limit 5`
 - Notes: `--completion_field completion.0` selects the first sampled completion when the completions JSONL stores a list. Add `--strict_answer_only` to score only the <answer>...</answer> body. Adjust the completions path to your actual run directory.
@@ -159,20 +159,20 @@ Manual Reward Scoring
 数值优先的 GRPO 训练
 - 目标：让 HoldingsDeltaORM（数值精度）主导优化，ContractHoldingsORM 仅作格式/边界兜底。
 - PowerShell（Windows）：
-  - `powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 6 -MaxCompletionLen 96 -RewardFuncs contract_holdings,external_holdings -RewardWeights 0.1,1.0 -Temperature 0.3 -StopWords "}"`
+  - `powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 6 -MaxCompletionLen 96 -Temperature 0.3 -StopWords "}"`
 - Bash（Linux/macOS）：
-  - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -F "contract_holdings external_holdings" -W "0.1 1.0" -T 0.3 -S "}"`
+  - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -T 0.3 -S "}"`
 - 提示：
-  - `-F/RewardFuncs` 与 `-W/RewardWeights` 顺序一一对应；若保留 `format` 但不想影响数值优化，可将对应权重设为 0。
+  - 默认使用 `mse_holdings`。如需用 `contract_holdings` 稍作格式牵引，可添加：`-F "contract_holdings mse_holdings" -W "0.05 1.0"`（PowerShell 对应 `-RewardFuncs`/`-RewardWeights`）。
   - 纯 JSON 输出建议 `-S/--StopWords '}'`；若使用 XML 两区块，改为 `'</answer>'` 并保持数据模板一致。
   - 温度建议 0.3–0.6，避免冗长输出；`MaxCompletionLen` 设定为能完整容纳 JSON 的最小足够长度以减少截断。
 
 在 SFT 基础上热启动 / 从 GRPO 断点续训
 - Bash（Linux/macOS）：
   - 基于已有 SFT LoRA 继续（请替换 `<SFT_ADAPTER_DIR>` 为你的 SFT 适配器目录，例如 `outputs/sft_qwen2.5_7b`）
-    - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -F "contract_holdings external_holdings" -W "0.1 1.0" -T 0.3 -S "}" -a <SFT_ADAPTER_DIR>`
+    - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -T 0.3 -S "}" -a <SFT_ADAPTER_DIR>`
   - 从已有 GRPO 检查点继续（请替换 `<GRPO_CKPT_DIR>` 为你的断点路径，例如 `outputs/grpo_qwen2.5_7b/checkpoint-1000`）
-    - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -F "contract_holdings external_holdings" -W "0.1 1.0" -T 0.3 -S "}" -r <GRPO_CKPT_DIR>`
+    - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -T 0.3 -S "}" -r <GRPO_CKPT_DIR>`
   - 说明：如未显式传入 `-r`，脚本会在输出目录中自动检测最新的 `checkpoint-*` 作为断点。
 - PowerShell（Windows）：
   - 基于 SFT LoRA：

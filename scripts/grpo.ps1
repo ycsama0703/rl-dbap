@@ -8,7 +8,8 @@ param(
   [string]$Adapters = "",
   [string]$ResumeFrom = "",
   # New: make rewards configurable (defaults keep backward compatibility)
-  [string[]]$RewardFuncs = @("contract_holdings","external_holdings","format"),
+  # Default to pure MSE reward unless overridden
+  [string[]]$RewardFuncs = @("mse_holdings"),
   [double[]]$RewardWeights = @(),
   [string]$StopWords = "",
   [double]$Temperature = 0.9
@@ -51,7 +52,7 @@ swift rlhf `
   --dataset_num_proc 2 `
   --num_generations $NumGenerations `
   --temperature $Temperature `
-  --beta 0.04 `
+  --beta 0.02 `
   --log_completions true `
   $(if ($RewardWeights.Count -gt 0) { "--reward_weights $($(($RewardWeights) -join ' '))" }) `
   $(if ($StopWords -ne "") { "--stop_words `"$StopWords`"" }) `

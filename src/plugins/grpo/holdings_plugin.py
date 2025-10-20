@@ -242,3 +242,56 @@ class HoldingsDeltaORM(ORM):
 # register names for --reward_funcs
 orms['external_holdings'] = HoldingsDeltaORM
 orms['contract_holdings'] = ContractHoldingsORM
+
+
+class MSEHoldingsORM(ORM):
+    """Pure MSE reward on holding_delta (or derived from holding_tp1).
+
+    - Prediction is parsed from JSON in <answer>...</answer> (fallback: anywhere),
+      using keys: `holding_delta` or `holding_tp1` with `holding_t`.
+    - Target is `label_delta` or (`label_tp1` - `holding_t`).
+    - Reward = - (pred - target)^2. If pred/target is missing, reward = 0.0.
+    """
+
+    def __call__(self, completions, label_delta=None, label_tp1=None, holding_t=None, **kwargs) -> List[float]:
+        rewards: List[float] = []
+        if not isinstance(label_delta, list):
+            label_delta = [label_delta] * len(completions)
+        if not isinstance(label_tp1, list):
+            label_tp1 = [label_tp1] * len(completions)
+        if not isinstance(holding_t, list):
+            holding_t = [holding_t] * len(completions)
+
+        for comp, gt_delta, gt_tp1, ht in zip(completions, label_delta, label_tp1, holding_t):
+            pred = None
+            try:
+                obj = _extract_json_from_answer(comp)
+                if isinstance(obj, dict):
+                    if obj.get('holding_delta') is not None:
+                        pred = float(obj['holding_delta'])
+                    elif obj.get('holding_tp1') is not None and ht is not None:
+                        pred = float(obj['holding_tp1']) - float(ht)
+            except Exception:
+                pred = None
+
+            tgt = None
+            try:
+                if gt_delta is not None:
+                    tgt = float(gt_delta)
+                elif gt_tp1 is not None and ht is not None:
+                    tgt = float(gt_tp1) - float(ht)
+            except Exception:
+                tgt = None
+
+            if pred is None or tgt is None:
+                rewards.append(0.0)
+                continue
+
+            e = pred - tgt
+            rewards.append(float(-(e * e)))
+
+        return rewards
+
+
+# register: pure MSE reward
+orms['mse_holdings'] = MSEHoldingsORM
