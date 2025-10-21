@@ -133,10 +133,10 @@ GRPO 承接 SFT 与断点续训（补充）
 
 训练（Python 执行 与 .sh 启动）
 - Python 执行（SFT）：
-  - `python -m swift.cli.sft --model "Qwen/Qwen2.5-7B-Instruct" --train_type lora --dataset artifacts/sft/sft_train.jsonl --torch_dtype bfloat16 --num_train_epochs 1 --per_device_train_batch_size 1 --gradient_accumulation_steps 16 --learning_rate 1e-4 --lora_rank 8 --lora_alpha 32 --target_modules all-linear --logging_steps 20 --save_steps 500 --save_total_limit 2 --max_length 2048 --output_dir outputs/sft_qwen2.5_7b --system "You are a quantitative portfolio manager. Respond with valid JSON only."`
+  - `python -m swift.cli.sft --model "Qwen/Qwen2.5-7B-Instruct" --train_type lora --dataset artifacts/sft/sft_train.jsonl --torch_dtype bfloat16 --num_train_epochs 3 --per_device_train_batch_size 1 --gradient_accumulation_steps 16 --learning_rate 1e-4 --lora_rank 8 --lora_alpha 32 --target_modules all-linear --logging_steps 20 --save_steps 500 --save_total_limit 2 --max_length 2048 --output_dir outputs/sft_qwen2.5_7b --system "You are a quantitative portfolio manager. Respond with valid JSON only."`
 - Python 执行（GRPO）：
 - `python -m swift.cli.rlhf --rlhf_type grpo --model "Qwen/Qwen2.5-7B-Instruct" --external_plugins src/plugins/grpo/holdings_plugin.py --reward_funcs mse_holdings --train_type lora --lora_rank 8 --lora_alpha 32 --target_modules all-linear --torch_dtype bfloat16 --dataset artifacts/grpo/grpo.jsonl --load_from_cache_file true --max_completion_length 512 --num_train_epochs 1 --per_device_train_batch_size 1 --learning_rate 1e-6 --gradient_accumulation_steps 8 --logging_steps 5 --save_steps 100 --save_total_limit 2 --max_length 2048 --output_dir outputs/grpo_qwen2.5_7b --warmup_ratio 0.05 --dataset_num_proc 2 --num_generations 4 --temperature 0.9 --beta 0.04 --log_completions true`
-- Linux/macOS（.sh 启动）：
+- Linux/macOS（.sh 启动，banks数据为例）：
   - SFT：`bash scripts/sft.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/sft/sft_train_banks.jsonl -o outputs/sft_qwen2.5_7b`
   - GRPO：`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo_banks.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512`（加 `-v` 启用 vLLM colocate）
   - macOS 若无 `bash` 可改用 `zsh` 执行上述命令。
@@ -169,8 +169,8 @@ Manual Reward Scoring
 
 在 SFT 基础上热启动 / 从 GRPO 断点续训
 - Bash（Linux/macOS）：
-  - 基于已有 SFT LoRA 继续（请替换 `<SFT_ADAPTER_DIR>` 为你的 SFT 适配器目录，例如 `outputs/sft_qwen2.5_7b`）
-    - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -T 0.3 -S "}" -a <SFT_ADAPTER_DIR>`
+  - 基于已有 SFT LoRA 继续（请替换 `<SFT_ADAPTER_DIR>` 为你的 SFT 适配器目录，例如 `outputs/sft_qwen2.5_7b/v2-20251021-083409/checkpoint-189`）
+    - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo_banks.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -T 0.3 -S "}" -a <SFT_ADAPTER_DIR>`
   - 从已有 GRPO 检查点继续（请替换 `<GRPO_CKPT_DIR>` 为你的断点路径，例如 `outputs/grpo_qwen2.5_7b/checkpoint-1000`）
     - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 6 -l 96 -T 0.3 -S "}" -r <GRPO_CKPT_DIR>`
   - 说明：如未显式传入 `-r`，脚本会在输出目录中自动检测最新的 `checkpoint-*` 作为断点。
