@@ -21,6 +21,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+try:
+    from tqdm import tqdm  # type: ignore
+except Exception:  # pragma: no cover - tqdm optional
+    tqdm = None
+
 from src.cli.run_eval import run_one, compare
 
 
@@ -57,7 +62,8 @@ def main() -> None:
     ]
 
     prev_pred_csv = None
-    for stage, lora_path in stages:
+    iterator = tqdm(stages, desc="eval stages") if tqdm else stages
+    for stage, lora_path in iterator:
         if stage != "base" and not lora_path:
             print(f"[eval-suite] skip {stage}: no LoRA path provided.")
             continue
