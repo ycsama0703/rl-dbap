@@ -7,13 +7,12 @@ param(
   [switch]$UseVllm,
   [string]$Adapters = "",
   [string]$ResumeFrom = "",
-  # New: make rewards configurable (defaults keep backward compatibility)
-  # Default to pure MSE reward unless overridden
-  [string[]]$RewardFuncs = @("mse_holdings"),
-  [double[]]$RewardWeights = @(),
   [string]$StopWords = "",
   [double]$Temperature = 0.9
 )
+
+$RewardFuncs = @("contract_holdings", "mse_holdings")
+$RewardWeights = @(0.3, 0.7)
 
 # Auto-detect latest checkpoint if -ResumeFrom not provided
 if (-not $ResumeFrom -and (Test-Path $OutputDir)) {
@@ -54,7 +53,7 @@ swift rlhf `
   --temperature $Temperature `
   --beta 0.02 `
   --log_completions true `
-  $(if ($RewardWeights.Count -gt 0) { "--reward_weights $($(($RewardWeights) -join ' '))" }) `
+  --reward_weights $($(($RewardWeights) -join ' ')) `
   $(if ($StopWords -ne "") { "--stop_words `"$StopWords`"" }) `
   $(if ($Adapters -ne "") { "--adapters `"$Adapters`"" }) `
   $(if ($ResumeFrom -ne "") { "--resume_from_checkpoint `"$ResumeFrom`"" }) `

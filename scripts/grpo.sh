@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Usage: bash scripts/grpo.sh -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR> \
 #        [-a <SFT_ADAPTER_DIR>] [-g <NUM_GENERATIONS>] [-l <MAX_COMPLETION_LEN>] [-r <CKPT_DIR>] [-v] \
-#        [-F "mse_holdings"] [-W "1.0"] [-S "</answer>"|"}"] [-T 0.9]
+#        [-S "</answer>"|"}"] [-T 0.9]
 #   -a: initialize from existing SFT LoRA adapters (e.g., outputs/sft_*)
 #   -r: resume GRPO from a checkpoint dir (e.g., outputs/grpo_*/checkpoint-1000)
 #   -v: use vLLM colocate mode
@@ -22,11 +22,11 @@ ADAPTERS=""
 RESUME_FROM=""
 TEMPERATURE=0.9
 STOP_WORDS=""
-# Default to pure MSE reward unless overridden via -F
-REWARD_FUNCS=(mse_holdings)
-REWARD_WEIGHTS=""
+# 固定使用格式/数值奖励组合
+REWARD_FUNCS=(contract_holdings mse_holdings)
+REWARD_WEIGHTS=(0.3 0.7)
 
-while getopts ":m:d:o:g:l:a:r:vF:W:S:T:" opt; do
+while getopts ":m:d:o:g:l:a:r:vS:T:" opt; do
   case ${opt} in
     m) MODEL="$OPTARG" ;;
     d) DATASET="$OPTARG" ;;
@@ -36,11 +36,9 @@ while getopts ":m:d:o:g:l:a:r:vF:W:S:T:" opt; do
     a) ADAPTERS="$OPTARG" ;;
     r) RESUME_FROM="$OPTARG" ;;
     v) USE_VLLM=1 ;;
-    F) REWARD_FUNCS=($OPTARG) ;;
-    W) REWARD_WEIGHTS="$OPTARG" ;;
     S) STOP_WORDS="$OPTARG" ;;
     T) TEMPERATURE="$OPTARG" ;;
-    *) echo "Usage: $0 -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR> [-a <SFT_ADAPTER_DIR>] [-g <NUM_GENERATIONS>] [-l <MAX_COMPLETION_LEN>] [-r <CKPT_DIR>] [-v] [-F <reward funcs>] [-W <reward weights>] [-S <stop words>] [-T <temperature>]" ; exit 1 ;;
+    *) echo "Usage: $0 -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR> [-a <SFT_ADAPTER_DIR>] [-g <NUM_GENERATIONS>] [-l <MAX_COMPLETION_LEN>] [-r <CKPT_DIR>] [-v] [-S <stop words>] [-T <temperature>]" ; exit 1 ;;
   esac
 done
 
@@ -98,7 +96,7 @@ swift rlhf \
   --temperature "${TEMPERATURE}" \
   --beta 0.02 \
   --log_completions true \
-  $( [[ -n "$REWARD_WEIGHTS" ]] && echo --reward_weights $REWARD_WEIGHTS ) \
+  --reward_weights ${REWARD_WEIGHTS[@]} \
   $( [[ -n "$STOP_WORDS" ]] && echo --stop_words "$STOP_WORDS" ) \
   "${EXTRA_VLLM_ARGS[@]}" \
   "${ADAPTER_ARGS[@]}" \
