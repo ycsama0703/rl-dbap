@@ -5,6 +5,11 @@ from pathlib import Path
 from src.backends.hf_infer import load_model_and_tokenizer, infer_chat_batch, extract_pred, build_eval_inputs
 from src.evaluation.metrics import basic_regression, topk
 
+try:
+    from tqdm import tqdm  # type: ignore
+except Exception:  # pragma: no cover - tqdm optional
+    tqdm = None
+
 
 def run_one(model_id: str, lora_path: str|None, test_path: str, out_dir: str,
             batch_size=8, max_new_tokens=48, temperature=0.0, torch_dtype="bfloat16"):
@@ -12,7 +17,10 @@ def run_one(model_id: str, lora_path: str|None, test_path: str, out_dir: str,
     chat_inputs, y_true, quarters, ids = build_eval_inputs(test_path)
     tok, mdl = load_model_and_tokenizer(model_id, lora_path, torch_dtype)
     preds=[]
-    for i in range(0, len(chat_inputs), batch_size):
+    iterator = range(0, len(chat_inputs), batch_size)
+    if tqdm:
+        iterator = tqdm(iterator, desc=f"infer {Path(out_dir).name}", total=(len(chat_inputs)+batch_size-1)//batch_size)
+    for i in iterator:
         outs = infer_chat_batch(tok, mdl, chat_inputs[i:i+batch_size],
                                 max_new_tokens=max_new_tokens, temperature=temperature)
         preds.extend([extract_pred(t) for t in outs])
@@ -84,4 +92,3 @@ if __name__=="__main__":
 
     if args.post_csv_for_compare:
         compare(str(Path(args.out_dir)/"pred_detail.csv"), args.post_csv_for_compare, args.out_dir)
-
