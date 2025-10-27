@@ -12,8 +12,13 @@ Example:
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import sys
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from src.backends.hf_infer import (
     load_model_and_tokenizer,
@@ -49,17 +54,19 @@ def main():
         required=True,
         help="Path to the GRPO LoRA checkpoint directory (e.g., outputs/.../checkpoint-1000).",
     )
+    parser.add_argument("--prompt", type=str, default="", help="Prompt text (highest priority).")
+    parser.add_argument("--prompt_file", type=str, default="", help="Path to a text file containing the prompt.")
     parser.add_argument(
-        "--prompt",
+        "--jsonl",
         type=str,
         default="",
-        help="Prompt text (if provided overrides --prompt_file).",
+        help="JSONL file (id/system/prompt) produced by export_infer_prompts.py.",
     )
     parser.add_argument(
-        "--prompt_file",
-        type=str,
-        default="",
-        help="Path to a text file containing the prompt.",
+        "--index",
+        type=int,
+        default=0,
+        help="Row index to read from --jsonl (0-based). Ignored if --prompt/--prompt_file is given.",
     )
     parser.add_argument(
         "--system",
@@ -88,14 +95,35 @@ def main():
     )
     args = parser.parse_args()
 
-    prompt = read_prompt(args).strip()
+    system = args.system.strip()
+    prompt = ""
+
+    if args.prompt:
+        prompt = args.prompt
+    elif args.prompt_file:
+        prompt = Path(args.prompt_file).read_text(encoding="utf-8")
+    elif args.jsonl:
+        jsonl_path = Path(args.jsonl)
+        if not jsonl_path.exists():
+            raise FileNotFoundError(f"JSONL file not found: {jsonl_path}")
+        with jsonl_path.open("r", encoding="utf-8") as fin:
+            for i, line in enumerate(fin):
+                if i != args.index:
+                    continue
+                record = json.loads(line)
+                system = record.get("system", system).strip() or system
+                prompt = record.get("prompt", "").strip()
+                break
+        if not prompt:
+            raise ValueError(f"Could not load prompt at index {args.index} from {jsonl_path}")
+    else:
+        prompt = read_prompt(args)
+
+    prompt = prompt.strip()
     if not prompt:
         raise ValueError("Prompt is empty after stripping whitespace.")
 
-    messages = [
-        {"role": "system", "content": args.system},
-        {"role": "user", "content": prompt},
-    ]
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
 
     tokenizer, model = load_model_and_tokenizer(args.base_model, args.checkpoint, args.torch_dtype)
     generations = infer_chat_batch(
