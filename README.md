@@ -30,15 +30,22 @@
   - Test：`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_test --date-start 2019-01-01`
 - 转换：
   - `python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft --out artifacts/sft/sft_train.jsonl`
-  - `python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo --out artifacts/grpo/grpo.jsonl`
+  - `python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo --out artifacts/grpo/grpo.jsonl`（默认插入无损失 `<think>` 示范，可加 `--no-think-example` 关闭）
   - `python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test --out artifacts/sft/test.jsonl`
 - 训练：
   - SFT：`powershell .\scripts\sft.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/sft/sft_train.jsonl" -OutputDir "outputs/sft_qwen2.5_7b"`
 - GRPO：`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512`
 - 评测：
-  - Base：`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path None --out_dir artifacts/eval_base`
-  - SFT：`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/sft_qwen2.5_7b --out_dir artifacts/eval_sft --post_csv_for_compare artifacts/eval_base/pred_detail.csv`
-  - GRPO：`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/grpo_qwen2.5_7b --out_dir artifacts/eval_grpo --post_csv_for_compare artifacts/eval_base/pred_detail.csv`
+- Base：`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path None --out_dir artifacts/eval_base`
+- SFT：`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/sft_qwen2.5_7b --out_dir artifacts/eval_sft --post_csv_for_compare artifacts/eval_base/pred_detail.csv`
+- GRPO：`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/grpo_qwen2.5_7b --out_dir artifacts/eval_grpo --post_csv_for_compare artifacts/eval_base/pred_detail.csv`
+
+推理与结果分析
+- 导出推理 prompts：`python scripts/export_infer_prompts.py --in artifacts/sft/test.jsonl --out-dir artifacts/test --stem test`（生成 base/GRPO 两份 `id/system/prompt` JSONL）
+- 单条调试：`python scripts/infer_grpo.py --base_model Qwen/Qwen2.5-7B-Instruct --checkpoint output/grpo_qwen2.5_7b/<run>/checkpoint-1000 --jsonl artifacts/test/test_prompts_grpo.jsonl --index 0`（`--checkpoint None` 可对比原始模型；同样支持 `--prompt`/`--prompt_file`）
+- 批量推理：`python scripts/batch_infer.py --jsonl artifacts/test/test_prompts_grpo.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --checkpoint output/grpo_qwen2.5_7b/<run>/checkpoint-1000 --labels artifacts/sft/test.jsonl --out_jsonl artifacts/test/grpo_outputs.jsonl --out_csv artifacts/test/grpo_outputs.csv --plot_dir artifacts/test/grpo_plots --progress_log_steps 100`
+  - 脚本自动解析 `<think>/<answer>`、提取 `holding_tp1`，并与真实标签对齐输出 JSONL/CSV；提供 `--plot_dir` 会额外生成残差直方图、预测对比散点与推理中 MAE/RMSE 曲线。
+  - 进度输出按 `--progress_log_steps` 展示覆盖率与运行 MAE/RMSE，方便监控大批量推理。
 
 环境安装（完整说明）
 - Windows（PowerShell）：见上文“一步跑通”。
@@ -62,7 +69,7 @@
 
 转换为训练/评测集
 - SFT：`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft --out artifacts/sft/sft_train.jsonl [--with-think]`
-- GRPO：`python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo --out artifacts/grpo/grpo.jsonl`
+- GRPO：`python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo --out artifacts/grpo/grpo.jsonl`（默认插入无损失 `<think>` 示范，可加 `--no-think-example` 关闭）
 - Test：`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test --out artifacts/sft/test.jsonl`
 
 训练与评估（细化）
@@ -163,8 +170,8 @@ Manual Reward Scoring
   - `powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 8 -MaxCompletionLen 96 -Temperature 0.3 -StopWords "}"`
 - Bash（Linux/macOS）：
   - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 8 -l 96 -T 0.3 -S "}"`
-- 提示：
-  - 脚本已写死 `contract_holdings`+`mse_holdings`（0.3/0.7）。如需调整比例，请直接修改 `scripts/grpo.sh` / `scripts/grpo.ps1` 中的常量。
+  - 提示：
+  - 脚本已写死 `contract_holdings`+`mse_holdings`（0.3/0.7）。如需调整比例，请直接修改 `scripts/grpo.sh` / `scripts/grpo.ps1` 中的常量；其中 `contract_holdings` 现会检查生成文本中是否含 `<think>…</think>`，缺失将记 0 分。
   - 纯 JSON 输出建议 `-S/--StopWords '}'`；若使用 XML 两区块，改为 `'</answer>'` 并保持数据模板一致。
   - 温度建议 0.3–0.6，避免冗长输出；`MaxCompletionLen` 设定为能完整容纳 JSON 的最小足够长度以减少截断。
 

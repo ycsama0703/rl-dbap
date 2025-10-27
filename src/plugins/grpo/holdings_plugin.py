@@ -6,6 +6,7 @@ from swift.plugin.orm import ORM, orms
 
 
 ANSWER_RE = re.compile(r"<answer>\s*(.*?)\s*</answer>", re.DOTALL | re.IGNORECASE)
+THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 
 def _extract_answer_body(text: str) -> str | None:
@@ -74,6 +75,9 @@ class ContractHoldingsORM(ORM):
             holding_t = [holding_t] * len(completions)
         for comp, ht in zip(completions, holding_t):
             try:
+                if not THINK_RE.search(comp or ""):
+                    rewards.append(0.0)
+                    continue
                 # Accept values inside <answer> or anywhere in completion as fallback
                 body = _extract_answer_body(comp) or comp or ""
 

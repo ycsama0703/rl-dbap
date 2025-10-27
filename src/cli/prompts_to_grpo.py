@@ -11,6 +11,8 @@ def main():
     ap.add_argument("--system", type=str,
                     default="You are a quantitative portfolio manager. Respond with valid JSON only.")
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--no-think-example", action="store_true",
+                    help="Do not prepend a non-loss <think> exemplar message.")
     args = ap.parse_args()
 
     inp = Path(args.inp)
@@ -27,11 +29,18 @@ def main():
                     prompt = rec.get("prompt") or rec.get("query")
                     if not prompt:
                         continue
+                    messages = [
+                        {"role": "system", "content": args.system},
+                        {"role": "user", "content": prompt},
+                    ]
+                    if not args.no_think_example:
+                        messages.append({
+                            "role": "assistant",
+                            "content": "<think>\n• Compare shifts in fundamentals (me, be, profit, Gat, beta).\n• Tie direction+magnitude to holding_t and recent deltas.\n• Check bounds: holding_tp1 ≥ 0, holding_delta ≥ -holding_t.\n</think>",
+                            "loss": False,
+                        })
                     out = {
-                        "messages": [
-                            {"role": "system", "content": args.system},
-                            {"role": "user", "content": prompt},
-                        ],
+                        "messages": messages,
                         # pass-through fields for reward
                         "label_delta": rec.get("label_delta"),
                         "label_tp1": rec.get("label_tp1") or rec.get("label"),
@@ -52,4 +61,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
