@@ -56,6 +56,8 @@ def main() -> None:
                     help="Random seed for reproducibility.")
     ap.add_argument("--out", type=pathlib.Path, default=None,
                     help="Optional path to save outputs as JSONL.")
+    ap.add_argument("--raw-output", action="store_true",
+                    help="If set, print/store the full decoded text without removing the prompt prefix.")
     args = ap.parse_args()
 
     random.seed(args.seed)
@@ -88,7 +90,10 @@ def main() -> None:
             eos_token_id=tokenizer.eos_token_id,
         )
         text = tokenizer.decode(generated[0], skip_special_tokens=True)
-        completion = text[len(chat_template):].strip()
+        if args.raw_output:
+            completion = text.strip()
+        else:
+            completion = text[len(chat_template):].strip()
         outputs.append(completion)
         print(f"\n=== sample {i + 1} ===")
         print(completion)
@@ -103,4 +108,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
