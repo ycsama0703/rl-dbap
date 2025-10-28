@@ -129,6 +129,8 @@ def stratified_sample_windows(
     time_bins: int = 10,
     cap_per_pair: int = 3,
     seed: int = 42,
+    *,
+    exclude_zero_holding_t: bool = False,
 ) -> List[WindowIndex]:
     """Per-type stratified sampling by time buckets with per (mgrno,permno) cap.
     Returns selected windows (subset of input windows).
@@ -140,6 +142,19 @@ def stratified_sample_windows(
     for tp, ws in _group_by(windows, key=lambda w: w.group_key[0]).items():
         if not ws:
             continue
+        # Optional: drop windows whose t-time holding equals 0.0
+        if exclude_zero_holding_t:
+            def _is_nonzero(w: WindowIndex) -> bool:
+                try:
+                    v = df.loc[w.idx_t]["holding_t"]
+                    if pd.isna(v):
+                        return False
+                    return float(v) != 0.0
+                except Exception:
+                    return False
+            ws = [w for w in ws if _is_nonzero(w)]
+            if not ws:
+                continue
         qids = np.array([w.qid_t for w in ws])
         # compute bin edges by quantiles
         unique_q = np.unique(qids)
@@ -163,8 +178,11 @@ def stratified_sample_windows(
         for w, b in zip(ws, bucket_ids):
             buckets[b].append(w)
 
-        # cap tracker per pair
+        # cap tracker per pair (persists across buckets within this type)
         cap = {}
+
+        # remember the index where this type's selection begins
+        base_sel_idx = len(selected)
 
         for b in range(B):
             quota = base + (1 if b < rem else 0)
@@ -202,6 +220,47 @@ def stratified_sample_windows(
                 if not pairs:
                     break
 
+        # Fallback fill: if we couldn't reach L due to sparse buckets, fill from
+        # remaining candidates across all buckets while respecting per-pair cap.
+        cur_sel = selected[base_sel_idx:]
+        if len(cur_sel) < L:
+            picked_keys = set((w.idx_tm3, w.idx_tm2, w.idx_tm1, w.idx_t) for w in cur_sel)
+            # Build remaining pool grouped by pair
+            remaining: List[WindowIndex] = []
+            for b in range(B):
+                for w in buckets.get(b, []):
+                    k = (w.idx_tm3, w.idx_tm2, w.idx_tm1, w.idx_t)
+                    if k not in picked_keys:
+                        remaining.append(w)
+            if remaining:
+                rng.shuffle(remaining)
+                per_pair_lists = {}
+                for w in remaining:
+                    pair = (w.group_key[1], w.group_key[2])
+                    per_pair_lists.setdefault(pair, []).append(w)
+                ptrs = {p: 0 for p in per_pair_lists}
+                pairs = list(per_pair_lists.keys())
+                rng.shuffle(pairs)
+                took_extra = 0
+                while len(cur_sel) + took_extra < L and pairs:
+                    new_pairs = []
+                    for p in pairs:
+                        used = cap.get(p, 0)
+                        if used >= cap_per_pair:
+                            continue
+                        i = ptrs[p]
+                        if i >= len(per_pair_lists[p]):
+                            continue
+                        w = per_pair_lists[p][i]
+                        selected.append(w)
+                        ptrs[p] = i + 1
+                        cap[p] = used + 1
+                        took_extra += 1
+                        if len(cur_sel) + took_extra >= L:
+                            break
+                        new_pairs.append(p)
+                    pairs = new_pairs
+
     return selected
 
 
@@ -211,4 +270,3 @@ def _group_by(items: Iterable, key):
         k = key(it)
         out.setdefault(k, []).append(it)
     return out
-

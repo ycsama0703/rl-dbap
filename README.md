@@ -32,6 +32,34 @@
   - `python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft --out artifacts/sft/sft_train.jsonl`
   - `python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo --out artifacts/grpo/grpo.jsonl`（默认插入无损失 `<think>` 示范，可加 `--no-think-example` 关闭）
   - `python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test --out artifacts/sft/test.jsonl`
+
+һ条命令生成单一类型数据集（含非零过滤）
+- 说明：为某个 firm type 一次性生成三份 prompts（SFT/GRPO/Test），并转成最终数据集（SFT/GRPO/Test）。默认时间切分：SFT ≤ 2016-12-31，GRPO 2017-01-01–2018-12-31，Test ≥ 2019-01-01。
+- 示例（Banks，过滤 t=0 且每分割各 1000 条）：
+  - `python -m src.cli.build_type_datasets --type banks --per-type-limit 1000 --exclude-zero-holding-t`
+- 可选参数：
+  - 修改时间切分：`--sft-end 2016-12-31 --grpo-start 2017-01-01 --grpo-end 2018-12-31 --test-start 2019-01-01`
+  - 允许 t=0：使用 `--include-zero-holding-t`（默认排除）
+  - SFT 转换包含无损 `<think>`：`--sft-with-think`
+  - GRPO 不插入无损 `<think>` 示例：`--grpo-no-think-example`
+
+Banks 非零持仓抽样（1000 条）示例流程
+- 目标：严格按时间切分，针对 Banks 抽取每个分割各 1000 条且 t 时刻持仓不为 0 的样本。
+- 生成 prompts（带非零过滤开关）：
+  - SFT（≤ 2016-12-31）：
+    - `python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_sft --include-types banks --per-type-limit 1000 --date-end 2016-12-31 --exclude-zero-holding-t`
+  - GRPO（2017-01-01–2018-12-31）：
+    - `python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_grpo --include-types banks --per-type-limit 1000 --date-start 2017-01-01 --date-end 2018-12-31 --exclude-zero-holding-t`
+  - Test（≥ 2019-01-01）：
+    - `python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_test --include-types banks --per-type-limit 1000 --date-start 2019-01-01 --exclude-zero-holding-t`
+- 转换为最终数据集：
+  - SFT：`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft/banks.jsonl --out artifacts/sft/sft_train_banks.jsonl`
+  - GRPO：`python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo/banks.jsonl --out artifacts/grpo/grpo_banks.jsonl`
+  - Test：`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test/banks.jsonl --out artifacts/test/test_banks.jsonl`
+- 快速校验（PowerShell）：
+  - 计数：`Get-Content artifacts/prompts_hist_sft/banks.jsonl | Measure-Object | % Count`
+  - 非零：`Get-Content artifacts/prompts_hist_sft/banks.jsonl | % { $o = $_ | ConvertFrom-Json; if ([double]$o.holding_t -eq 0) { throw 'found zero in SFT' } }`
+  - 注：采样器会在时间桶配额不足时回填，尽量凑满 1000；若非零窗口总体不足，将低于配额。
 - 训练：
   - SFT：`powershell .\scripts\sft.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/sft/sft_train.jsonl" -OutputDir "outputs/sft_qwen2.5_7b"`
 - GRPO：`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512`

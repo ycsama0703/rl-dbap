@@ -66,6 +66,7 @@ def build_for_file(
     progress_every: int = 1000,
     use_tqdm: bool = False,
     mapping: dict | None = None,
+    exclude_zero_holding_t: bool = False,
 ):
     t0 = time.perf_counter()
     print(f"[history-prompts] reading: {in_file}", flush=True)
@@ -96,7 +97,15 @@ def build_for_file(
         f"windows={len(windows):,}",
         flush=True,
     )
-    picked = stratified_sample_windows(df, windows, per_type_limit=per_type_limit, time_bins=time_bins, cap_per_pair=cap_per_pair, seed=seed)
+    picked = stratified_sample_windows(
+        df,
+        windows,
+        per_type_limit=per_type_limit,
+        time_bins=time_bins,
+        cap_per_pair=cap_per_pair,
+        seed=seed,
+        exclude_zero_holding_t=exclude_zero_holding_t,
+    )
     print(f"[history-prompts] {in_file.stem}: sampled={len(picked):,} (limit={per_type_limit})", flush=True)
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -178,6 +187,7 @@ def main():
     ap.add_argument("--head", type=int, default=None, help="Use only first N rows after sorting (debug speed)")
     ap.add_argument("--progress-every", type=int, default=2000, help="Print progress every N writes if no tqdm")
     ap.add_argument("--use-tqdm", action="store_true", help="Use tqdm progress bars if installed")
+    ap.add_argument("--exclude-zero-holding-t", action="store_true", help="Exclude windows where t-time holding_t == 0")
     args = ap.parse_args()
 
     in_dir = Path(args.in_dir)
@@ -220,6 +230,7 @@ def main():
             progress_every=args.progress_every,
             use_tqdm=args.use_tqdm,
             mapping=mp,
+            exclude_zero_holding_t=args.exclude_zero_holding_t,
         )
         print(f"[history-prompts] {fp.stem}: wrote {n} -> {outp}")
         total += n
