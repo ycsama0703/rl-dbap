@@ -76,6 +76,7 @@ def main() -> None:
     user_prompt = load_prompt(args.prompt_file)
     chat_template, encoded = prepare_inputs(tokenizer, args.system, user_prompt)
     encoded = encoded.to(model.device)
+    input_length = encoded["input_ids"].shape[1]
 
     outputs: List[str] = []
     print(f"[sample_qwen] sampling {args.num_samples} completions...")
@@ -89,11 +90,11 @@ def main() -> None:
             pad_token_id=tokenizer.eos_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
-        text = tokenizer.decode(generated[0], skip_special_tokens=True)
         if args.raw_output:
-            completion = text.strip()
+            completion = tokenizer.decode(generated[0], skip_special_tokens=True).strip()
         else:
-            completion = text[len(chat_template):].strip()
+            new_tokens = generated[0, input_length:]
+            completion = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
         outputs.append(completion)
         print(f"\n=== sample {i + 1} ===")
         print(completion)
