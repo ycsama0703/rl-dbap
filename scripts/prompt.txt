@@ -1,0 +1,33 @@
+Act as a bank portfolio manager.
+
+Your goal is to adjust your portfolio holdings for {ticker} according to the change in fundamental data.
+"holding_delta" means the ABSOLUTE change in holdings (same units as holding).
+Formula: holding_delta = holding_tp1 - holding_t.
+Direction is given by the sign of holding_delta ≥ -holding_t.
+
+Ticker: KMT | Company: KENNAMETAL INC
+
+{t-3 data}
+me=3239.429165, be=1595.985, profit=0.133682, Gat=-0.034306, beta=1.668565
+aum=674.357167, outAUM=169.868261, holding=0.467601, price=39.459999
+holding_delta: 0.54
+
+{t-2 data}
+me=3203.928, be=1686.011, profit=0.163577, Gat=0.00975, beta=1.645353
+aum=646.649827, outAUM=144.096514, holding=1.003821, price=39
+holding_delta: 1.60
+
+{t-1 data}
+me=3452.904555, be=1717.467, profit=0.187685, Gat=0.031602, beta=1.653043
+aum=674.478934, outAUM=149.686489, holding=2.603766, price=42.209999
+holding_delta: -0.19
+
+Now, these are the new data:
+{t data}
+me=2604.630834, be=1795.865, profit=0.204066, Gat=0.105789, beta=1.642396
+aum=600.846005, outAUM=123.038814, holding=2.413953, price=32.740002
+
+OUTPUT FORMAT & REASONING GUIDE
+- First output <think>...</think>, explaining how the current fundamentals lead to your final adjustment; keep it numeric and brief (<= 2 decimal places).
+- Then output <answer>...</answer> with exactly one JSON object {"holding_delta": <float>} (<= 2 decimals, no scientific notation).
+- Do not add any other text before, between, or after these blocks. Stop immediately after </answer>.

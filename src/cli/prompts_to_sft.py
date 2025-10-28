@@ -3,15 +3,11 @@
 from __future__ import annotations
 import argparse, json
 from pathlib import Path
+from typing import Callable
 
 
-def _resolve_label(rec: dict) -> float | None:
-    """Resolve absolute label for SFT from multiple possible fields.
-    Priority:
-      1) rec['label'] -> absolute holding_tp1
-      2) rec['label_tp1'] -> absolute
-      3) rec['label_delta'] + rec['holding_t'] -> absolute = holding_t + delta
-    """
+def _resolve_absolute(rec: dict) -> float | None:
+    """Resolve absolute holding_tp1 value."""
     try:
         if rec.get("label") is not None:
             return float(rec["label"])  # absolute
@@ -24,22 +20,56 @@ def _resolve_label(rec: dict) -> float | None:
     return None
 
 
+def _resolve_delta(rec: dict) -> float | None:
+    """Resolve holding_delta value."""
+    try:
+        if rec.get("label_delta") is not None:
+            return float(rec["label_delta"])
+        if rec.get("label_tp1") is not None and rec.get("holding_t") is not None:
+            return float(rec["label_tp1"]) - float(rec["holding_t"])
+    except Exception:
+        return None
+    return None
+
+
+def _format_float(value: float, decimals: int) -> float:
+    """Round float to the desired decimal places while avoiding scientific notation in JSON."""
+    return float(f"{value:.{decimals}f}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="inp", type=str, required=True,
                     help="input prompts jsonl or directory with jsonl files")
     ap.add_argument("--out", dest="out", type=str, default="artifacts/sft/sft_train.jsonl")
     ap.add_argument("--system", type=str,
-                    default="You are a quantitative portfolio manager. Predict next-quarter absolute holding as valid JSON.")
+                    default="You are a quantitative portfolio manager. Respond with valid JSON only.")
     ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--with-think", action="store_true",
-                    help="Add a non-loss assistant <think> message before the JSON answer")
+    ap.add_argument("--with-think", dest="with_think", action="store_true", default=True,
+                    help="Include a non-loss assistant <think> message before the JSON answer (default: enabled)")
+    ap.add_argument("--no-think", dest="with_think", action="store_false",
+                    help="Disable the additional <think> message")
+    ap.add_argument("--contract-mode", choices=["absolute", "delta"], default="delta",
+                    help="Select prediction target: absolute holding_tp1 or holding_delta.")
+    ap.add_argument("--think-template", type=str,
+                    default="<think>Note key factor shifts and how they justify the final adjustment.</think>",
+                    help="Content to use for the optional <think> message when --with-think is enabled.")
+    ap.add_argument("--decimals", type=int, default=2,
+                    help="Maximum decimal places for numeric outputs (default: 2).")
     args = ap.parse_args()
 
     inp = Path(args.inp)
     files = [inp] if inp.is_file() else sorted(inp.glob("*.jsonl"))
     outp = Path(args.out)
     outp.parent.mkdir(parents=True, exist_ok=True)
+
+    resolver: Callable[[dict], float | None]
+    if args.contract_mode == "absolute":
+        resolver = _resolve_absolute
+        answer_key = "holding_tp1"
+    else:
+        resolver = _resolve_delta
+        answer_key = "holding_delta"
 
     n = 0
     with outp.open("w", encoding="utf-8") as fout:
@@ -50,18 +80,19 @@ def main():
                     prompt = rec.get("prompt") or rec.get("query")
                     if not prompt:
                         continue
-                    label_tp1 = _resolve_label(rec)
-                    if label_tp1 is None:
-                        continue   # need an absolute label
-                    resp = json.dumps({"holding_tp1": float(label_tp1)}, ensure_ascii=False)
+                    label_val = resolver(rec)
+                    if label_val is None:
+                        continue  # skip if required label missing
+                    value = _format_float(float(label_val), args.decimals)
+                    resp = json.dumps({answer_key: value}, ensure_ascii=False)
 
                     msgs = [
                         {"role": "system", "content": args.system},
                         {"role": "user", "content": prompt},
                     ]
                     if args.with_think:
-                        msgs.append({"role": "assistant", "content": "<think>...</think>", "loss": False})
-                    msgs.append({"role": "assistant", "content": resp, "loss": True})
+                        msgs.append({"role": "assistant", "content": args.think_template, "loss": False})
+                    msgs.append({"role": "assistant", "content": f"<answer>\n{resp}\n</answer>", "loss": True})
 
                     out = {"messages": msgs}
 

@@ -16,8 +16,24 @@ def _ensure_dir(p: Path) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _convert_prompts_to_sft(inp: Path, outp: Path, *, system: str, with_think: bool = False, limit: Optional[int] = None) -> int:
-    from src.cli.prompts_to_sft import _resolve_label  # reuse label logic
+def _convert_prompts_to_sft(
+    inp: Path,
+    outp: Path,
+    *,
+    system: str,
+    with_think: bool = True,
+    contract_mode: str = "delta",
+    decimals: int = 2,
+    think_template: str = "<think>Note key factor shifts and how they justify the final adjustment.</think>",
+    limit: Optional[int] = None,
+) -> int:
+    from src.cli.prompts_to_sft import _resolve_absolute, _resolve_delta, _format_float
+
+    if contract_mode not in {"absolute", "delta"}:
+        raise ValueError(f"unknown contract_mode={contract_mode}")
+    resolver = _resolve_delta if contract_mode == "delta" else _resolve_absolute
+    answer_key = "holding_delta" if contract_mode == "delta" else "holding_tp1"
+
     _ensure_dir(outp)
     n = 0
     with inp.open("r", encoding="utf-8") as f, outp.open("w", encoding="utf-8") as fout:
@@ -26,17 +42,18 @@ def _convert_prompts_to_sft(inp: Path, outp: Path, *, system: str, with_think: b
             prompt = rec.get("prompt") or rec.get("query")
             if not prompt:
                 continue
-            label_tp1 = _resolve_label(rec)
-            if label_tp1 is None:
+            label_val = resolver(rec)
+            if label_val is None:
                 continue
-            resp = json.dumps({"holding_tp1": float(label_tp1)}, ensure_ascii=False)
+            value = _format_float(float(label_val), decimals)
+            resp = json.dumps({answer_key: value}, ensure_ascii=False)
             msgs = [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ]
             if with_think:
-                msgs.append({"role": "assistant", "content": "<think>...</think>", "loss": False})
-            msgs.append({"role": "assistant", "content": resp, "loss": True})
+                msgs.append({"role": "assistant", "content": think_template, "loss": False})
+            msgs.append({"role": "assistant", "content": f"<answer>\n{resp}\n</answer>", "loss": True})
             out = {"messages": msgs}
             fout.write(json.dumps(out, ensure_ascii=False) + "\n")
             n += 1
@@ -61,7 +78,7 @@ def _convert_prompts_to_grpo(inp: Path, outp: Path, *, system: str, no_think_exa
             if not no_think_example:
                 messages.append({
                     "role": "assistant",
-                    "content": "<think>\n• Compare shifts in fundamentals (me, be, profit, Gat, beta).\n• Tie direction+magnitude to holding_t and recent deltas.\n• Check bounds: holding_tp1 >= 0, holding_delta >= -holding_t.\n</think>",
+                    "content": "<think>\n- Compare shifts in fundamentals (me, be, profit, Gat, beta).\n- Tie direction and magnitude to holding_t and recent deltas.\n- Check bounds: holding_tp1 >= 0 and holding_delta >= -holding_t.\n</think>",
                     "loss": False,
                 })
             out = {
@@ -110,8 +127,19 @@ def main():
     ap.add_argument("--include-zero-holding-t", dest="exclude_zero", action="store_false")
     ap.set_defaults(exclude_zero=True)
     # converter knobs
-    ap.add_argument("--sft-with-think", action="store_true")
+    ap.add_argument("--sft-with-think", dest="sft_with_think", action="store_true",
+                    help="Force enabling <think> message in SFT data (default: enabled)")
+    ap.add_argument("--sft-no-think", dest="sft_with_think", action="store_false",
+                    help="Disable the <think> message in SFT data")
+    ap.add_argument("--sft-contract-mode", choices=["absolute", "delta"], default="delta",
+                    help="Target for SFT outputs (default: delta)")
+    ap.add_argument("--sft-decimals", type=int, default=2,
+                    help="Round SFT labels to this many decimals (default: 2)")
+    ap.add_argument("--sft-think-template", type=str,
+                    default="<think>Note key factor shifts and how they justify the final adjustment.</think>",
+                    help="Template injected when --sft-with-think is active")
     ap.add_argument("--grpo-no-think-example", action="store_true")
+    ap.set_defaults(sft_with_think=True)
     args = ap.parse_args()
 
     t = args.type
@@ -194,10 +222,25 @@ def main():
 
     # 2) Convert
     print(f"[type-pipeline] convert SFT -> chat ({sft_out})")
-    _convert_prompts_to_sft(ph_sft, sft_out, system="You are a quantitative portfolio manager. Predict next-quarter absolute holding as valid JSON.", with_think=args.sft_with_think)
+    _convert_prompts_to_sft(
+        ph_sft,
+        sft_out,
+        system="You are a quantitative portfolio manager. Respond with valid JSON only.",
+        with_think=args.sft_with_think,
+        contract_mode=args.sft_contract_mode,
+        decimals=args.sft_decimals,
+        think_template=args.sft_think_template,
+    )
 
     print(f"[type-pipeline] convert TEST -> chat ({sft_test_out})")
-    _convert_prompts_to_sft(ph_test, sft_test_out, system="You are a quantitative portfolio manager. Predict next-quarter absolute holding as valid JSON.")
+    _convert_prompts_to_sft(
+        ph_test,
+        sft_test_out,
+        system="You are a quantitative portfolio manager. Respond with valid JSON only.",
+        with_think=False,
+        contract_mode="absolute",
+        decimals=args.sft_decimals,
+    )
 
     print(f"[type-pipeline] convert GRPO -> dataset ({grpo_out})")
     _convert_prompts_to_grpo(ph_grpo, grpo_out, system="You are a quantitative portfolio manager. Respond with valid JSON only.", no_think_example=args.grpo_no_think_example)

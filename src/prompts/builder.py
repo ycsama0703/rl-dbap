@@ -53,7 +53,11 @@ def build_history_prompt(
     assert len(hist_rows) >= 4, "need at least 4 rows: t-3..t"
     r_tm3, r_tm2, r_tm1, r_t = hist_rows[-4], hist_rows[-3], hist_rows[-2], hist_rows[-1]
 
-    role = r_t.investor_type or "Unknown"
+    role_raw = r_t.investor_type or "Unknown"
+    role = role_raw.strip() if isinstance(role_raw, str) else str(role_raw)
+    role_phrase = role.lower()
+    if role_phrase.endswith("s"):
+        role_phrase = role_phrase[:-1]
     mgrno = r_t.mgrno
     permno = r_t.permno
 
@@ -73,7 +77,7 @@ def build_history_prompt(
             if pd.isna(prev.holding_t) or pd.isna(curr.holding_t):
                 return "NA"
             diff = float(curr.holding_t) - float(prev.holding_t)
-            s = f"{diff:.6f}".rstrip('0').rstrip('.')
+            s = f"{diff:.2f}".rstrip('0').rstrip('.')
             if s == "-0":
                 s = "0"
             return s
@@ -82,7 +86,7 @@ def build_history_prompt(
 
     if strict_contract:
         header = (
-            f"You are a {role}.\n\n"
+            f"Act as a {role_phrase} portfolio manager.\n\n"
             f"Your goal is to adjust your portfolio holdings for {{ticker}} according to the change in fundamental data.\n"
             f"\"holding_delta\" means the ABSOLUTE change in holdings (same units as holding).\n"
             f"Formula: holding_delta = holding_tp1 - holding_t.\n"
@@ -95,51 +99,27 @@ def build_history_prompt(
         )
 
     hist = (
-        f"{{t-3 data}}\n{block('', r_tm3)}\nChange: {change(r_tm3, r_tm2)}\n\n"
-        f"{{t-2 data}}\n{block('', r_tm2)}\nChange: {change(r_tm2, r_tm1)}\n\n"
-        f"{{t-1 data}}\n{block('', r_tm1)}\nChange: {change(r_tm1, r_t)}\n\n"
+        f"{{t-3 data}}\n{block('', r_tm3)}\nholding_delta: {change(r_tm3, r_tm2)}\n\n"
+        f"{{t-2 data}}\n{block('', r_tm2)}\nholding_delta: {change(r_tm2, r_tm1)}\n\n"
+        f"{{t-1 data}}\n{block('', r_tm1)}\nholding_delta: {change(r_tm1, r_t)}\n\n"
     )
 
     now_block = f"Now, these are the new data:\n{block('{t data}', r_t)}\n\n"
 
     if strict_contract:
-        reasoning = (
-            "<think>\n"
-            "Reasoning instructions (keep it concise and numeric):\n"
-            "1) Briefly explain the main drivers based on observed changes in fundamentals (me, be, profit, Gat, beta).\n"
-            "2) Justify direction and rough magnitude referencing prior holding_t and any shocks.\n"
-            "3) Respect bounds: holding_tp1 ≥ 0 ⇒ holding_delta ≥ -holding_t.\n"
-            "4) Round to 6 decimals max; avoid scientific notation.\n"
-            "Keep to short bullet calculations only.\n"
-            "</think>\n\n"
-        )
-        contract = (
-            "STRICT OUTPUT CONTRACT — READ CAREFULLY\n"
-            "• Output exactly TWO XML blocks in order: <think>…</think> then <answer>…</answer>.\n"
-            "• The <answer> block must be either:\n"
-            "  {\"holding_delta\": <float>}  (preferred)  OR  {\"holding_tp1\": <float>}\n"
-            "• No other text outside these two blocks; the <think> can contain free-form reasoning, the <answer> must contain only the JSON object.\n"
-            "• Keys lowercase, appear once only. Value must be a finite decimal number (not string), ≤ 6 decimals, no scientific notation, no trailing comma.\n"
-            "• If using holding_tp1, it MUST satisfy holding_tp1 ≥ 0.\n"
-            "• Stop immediately after </answer>.\n"
+        instructions = (
+            "OUTPUT FORMAT & REASONING GUIDE\n"
+            "- First output <think>...</think>, explaining how the current fundamentals lead to your final adjustment; keep it numeric and brief (<= 2 decimal places).\n"
+            "- Then output <answer>...</answer> with exactly one JSON object {\"holding_delta\": <float>} (<= 2 decimals, no scientific notation).\n"
+            "- Do not add any other text before, between, or after these blocks. Stop immediately after </answer>.\n\n"
         )
     else:
-        reasoning = (
-            "<think>...</think>\n\n"
-        )
-        contract = ""
-
-    if target == "delta":
-        json_hint = '{"holding_delta": <float>}'
-    else:
-        json_hint = '{"holding_tp1": <float>}'
+        instructions = ""
 
     prompt = header
     prompt += (f"Ticker: {permno}\n\n" if permno is not None else "")
     prompt += hist + now_block
-    prompt += reasoning
-    prompt += f"<answer>\n{json_hint}\n</answer>\n\n"
-    prompt += contract
+    prompt += instructions
 
     extras = {
         "mgrno": mgrno,
