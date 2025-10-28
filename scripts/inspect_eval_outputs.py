@@ -15,12 +15,7 @@ from typing import List, Dict, Any
 
 import torch
 
-from src.backends.hf_infer import (
-    build_eval_inputs,
-    load_model_and_tokenizer,
-    infer_chat_batch,
-    extract_pred,
-)
+from src.backends.hf_infer import build_eval_inputs, load_model_and_tokenizer, extract_pred
 
 
 def chunked(iterable, size):
@@ -103,17 +98,36 @@ def main() -> None:
     preds: List[float | None] = []
 
     print("[inspect] running inference...")
-    for batch in chunked(list(range(len(chat_inputs))), args.batch_size):
+    iterator = chunked(list(range(len(chat_inputs))), args.batch_size)
+    try:
+        from tqdm import tqdm  # type: ignore
+
+        iterator = tqdm(iterator, total=(len(chat_inputs) + args.batch_size - 1) // args.batch_size)
+    except Exception:  # pragma: no cover - tqdm optional
+        pass
+
+    for batch in iterator:
         batch_msgs = [chat_inputs[i] for i in batch]
-        outs = infer_chat_batch(
-            tokenizer,
-            model,
-            batch_msgs,
-            max_new_tokens=args.max_new_tokens,
+        prompts = [
+            tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+            for msgs in batch_msgs
+        ]
+        enc = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
+        generated = model.generate(
+            **enc,
+            do_sample=(args.temperature > 0),
             temperature=args.temperature,
+            max_new_tokens=args.max_new_tokens,
+            pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id,
         )
-        raw_outputs.extend(outs)
-        preds.extend(extract_pred(t) for t in outs)
+        prompt_lengths = enc["attention_mask"].sum(dim=1).tolist()
+        for seq, prompt_len in zip(generated, prompt_lengths):
+            prompt_len = int(prompt_len)
+            new_tokens = seq[prompt_len:]
+            decoded = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+            raw_outputs.append(decoded)
+            preds.append(extract_pred(decoded))
 
     records: List[Dict[str, Any]] = []
     fail_count = 0
@@ -162,4 +176,3 @@ def main() -> None:
 if __name__ == "__main__":
     torch.set_grad_enabled(False)
     main()
-
