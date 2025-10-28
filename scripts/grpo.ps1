@@ -12,7 +12,7 @@ param(
 )
 
 $RewardFuncs = @("contract_holdings", "mse_holdings")
-$RewardWeights = @(0.3, 0.7)
+$RewardWeights = @(0.4, 0.6)
 
 # Auto-detect latest checkpoint if -ResumeFrom not provided
 if (-not $ResumeFrom -and (Test-Path $OutputDir)) {

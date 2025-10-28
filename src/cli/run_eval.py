@@ -14,7 +14,7 @@ except Exception:  # pragma: no cover - tqdm optional
 def run_one(model_id: str, lora_path: str|None, test_path: str, out_dir: str,
             batch_size=8, max_new_tokens=48, temperature=0.0, torch_dtype="bfloat16"):
 
-    chat_inputs, y_true, quarters, ids = build_eval_inputs(test_path)
+    chat_inputs, y_true, quarters, ids, holding_ts = build_eval_inputs(test_path)
     tok, mdl = load_model_and_tokenizer(model_id, lora_path, torch_dtype)
     preds=[]
     iterator = range(0, len(chat_inputs), batch_size)
@@ -23,7 +23,8 @@ def run_one(model_id: str, lora_path: str|None, test_path: str, out_dir: str,
     for i in iterator:
         outs = infer_chat_batch(tok, mdl, chat_inputs[i:i+batch_size],
                                 max_new_tokens=max_new_tokens, temperature=temperature)
-        preds.extend([extract_pred(t) for t in outs])
+        for raw, ht in zip(outs, holding_ts[i:i+batch_size]):
+            preds.append(extract_pred(raw, ht))
 
     df = pd.DataFrame({"id": ids, "quarter": quarters, "y_true": y_true, "y_pred": preds[:len(y_true)]}).set_index("id")
     df["valid"]=df["y_pred"].notna()

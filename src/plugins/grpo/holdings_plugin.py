@@ -1,8 +1,11 @@
 import json
+import math
 import re
 from typing import List
 
 from swift.plugin.orm import ORM, orms
+
+import numpy as np
 
 
 ANSWER_RE = re.compile(r"<answer>\s*(.*?)\s*</answer>", re.DOTALL | re.IGNORECASE)
@@ -59,15 +62,13 @@ def _extract_json_from_answer(text: str):
 class ContractHoldingsORM(ORM):
     """Format/number contract for holdings output while allowing reasoning.
 
-    - Extracts the first occurrence of either {"holding_delta": <num>} or
-      {"holding_tp1": <num>} from the <answer> body (tolerates extra text).
+    - Extracts the first occurrence of {"holding_delta": <num>} from the <answer> body (tolerates extra text).
     - Numeric value must be a finite decimal with up to 6 decimals.
-    - Bounds: holding_tp1 >= 0; holding_delta >= -holding_t (when provided).
-    Reward: 1.0 if a valid value is found and passes bounds, else 0.0.
+    - Bounds: holding_delta >= -holding_t (when provided).
+    Reward: +1.0 if a valid value is found and passes bounds, else -1.0.
     """
 
     _DELTA_SEARCH = re.compile(r'"holding_delta"\s*:\s*(-?\d+(?:\.\d{1,6})?)', re.IGNORECASE)
-    _TP1_SEARCH = re.compile(r'"holding_tp1"\s*:\s*(\d+(?:\.\d{1,6})?)', re.IGNORECASE)
 
     def __call__(self, completions, holding_t=None, **kwargs) -> List[float]:
         rewards: List[float] = []
@@ -76,7 +77,7 @@ class ContractHoldingsORM(ORM):
         for comp, ht in zip(completions, holding_t):
             try:
                 if not THINK_RE.search(comp or ""):
-                    rewards.append(0.0)
+                    rewards.append(-1.0)
                     continue
                 # Accept values inside <answer> or anywhere in completion as fallback
                 body = _extract_answer_body(comp) or comp or ""
@@ -85,23 +86,14 @@ class ContractHoldingsORM(ORM):
                 if m:
                     val = float(m.group(1))
                     if ht is not None and val < -float(ht):
-                        rewards.append(0.0)
+                        rewards.append(-1.0)
                         continue
                     rewards.append(1.0)
                     continue
 
-                m = self._TP1_SEARCH.search(body)
-                if m:
-                    val = float(m.group(1))
-                    if val < 0:
-                        rewards.append(0.0)
-                        continue
-                    rewards.append(1.0)
-                    continue
-
-                rewards.append(0.0)
+                rewards.append(-1.0)
             except Exception:
-                rewards.append(0.0)
+                rewards.append(-1.0)
         return rewards
 
 
@@ -110,7 +102,7 @@ class HoldingsDeltaORM(ORM):
 
     - Magnitude reward R_mag: normalized Huber on error e=pred-target with adaptive/robust scale.
     - Direction reward R_dir: sigmoid on scaled pred aligned with sign(target).
-    Accepts either holding_delta or holding_tp1 (converted using holding_t).
+    Accepts holding_delta values only.
     """
 
     def __init__(self):
@@ -119,13 +111,11 @@ class HoldingsDeltaORM(ORM):
 
     @staticmethod
     def _sigmoid(x: float) -> float:
-        import math
         x = max(min(x, 20.0), -20.0)
         return 1.0 / (1.0 + math.exp(-x))
 
     @staticmethod
     def _huber(e: float, c: float) -> float:
-        import math
         ae = abs(e)
         if ae <= c:
             return 0.5 * e * e
@@ -176,8 +166,6 @@ class HoldingsDeltaORM(ORM):
                 if isinstance(obj, dict):
                     if obj.get('holding_delta') is not None:
                         pred = float(obj['holding_delta'])
-                    elif obj.get('holding_tp1') is not None and ht is not None:
-                        pred = float(obj['holding_tp1']) - float(ht)
             except Exception:
                 pred = None
 
@@ -185,8 +173,6 @@ class HoldingsDeltaORM(ORM):
             try:
                 if gt_delta is not None:
                     tgt = float(gt_delta)
-                elif gt_tp1 is not None and ht is not None:
-                    tgt = float(gt_tp1) - float(ht)
             except Exception:
                 tgt = None
 
@@ -232,13 +218,15 @@ class HoldingsDeltaORM(ORM):
 
         for pred, tgt, e, r_val in zip(preds, targets, es, rs):
             if pred is None or tgt is None or e is None or r_val is None:
-                rewards.append(0.0)
+                rewards.append(-1.0)
                 continue
-            l = self._huber(e, c_mag)
-            r_mag = 1.0 - min(l / (0.5 * c_mag * c_mag), 1.0)
+            sig = math.copysign(math.log1p(abs(e)), e)
+            sim01 = 1.0 - min((sig * sig) / 4.0, 1.0)
+            r_mag = 2.0 * sim01 - 1.0
+
             s = (pred / c_dir) * (1.0 if r_val >= 0 else -1.0)
             r_dir = self._sigmoid(alpha * (s - margin))
-            rewards.append(float(w_mag * r_mag + w_dir * r_dir))
+            rewards.append(float(w_mag * r_mag + w_dir * (2.0 * r_dir - 1.0)))
 
         return rewards
 
@@ -254,11 +242,10 @@ class MSEHoldingsORM(ORM):
     - Prediction is parsed from JSON in <answer>...</answer> (fallback: anywhere),
       using keys: `holding_delta` or `holding_tp1` with `holding_t`.
     - Target is `label_delta` or (`label_tp1` - `holding_t`).
-    - Reward = - (pred - target)^2. If pred/target is missing, reward = 0.0.
+    - Reward scaled to [-1, +1]. If pred/target is missing, reward = -1.0.
     """
 
     def __call__(self, completions, label_delta=None, label_tp1=None, holding_t=None, **kwargs) -> List[float]:
-        rewards: List[float] = []
         if not isinstance(label_delta, list):
             label_delta = [label_delta] * len(completions)
         if not isinstance(label_tp1, list):
@@ -266,6 +253,7 @@ class MSEHoldingsORM(ORM):
         if not isinstance(holding_t, list):
             holding_t = [holding_t] * len(completions)
 
+        errors: list[float | None] = []
         for comp, gt_delta, gt_tp1, ht in zip(completions, label_delta, label_tp1, holding_t):
             pred = None
             try:
@@ -273,8 +261,6 @@ class MSEHoldingsORM(ORM):
                 if isinstance(obj, dict):
                     if obj.get('holding_delta') is not None:
                         pred = float(obj['holding_delta'])
-                    elif obj.get('holding_tp1') is not None and ht is not None:
-                        pred = float(obj['holding_tp1']) - float(ht)
             except Exception:
                 pred = None
 
@@ -282,17 +268,31 @@ class MSEHoldingsORM(ORM):
             try:
                 if gt_delta is not None:
                     tgt = float(gt_delta)
-                elif gt_tp1 is not None and ht is not None:
-                    tgt = float(gt_tp1) - float(ht)
             except Exception:
                 tgt = None
 
             if pred is None or tgt is None:
-                rewards.append(0.0)
+                errors.append(None)
                 continue
 
-            e = pred - tgt
-            rewards.append(float(-(e * e)))
+            errors.append(pred - tgt)
+
+        rewards: List[float] = []
+        valid_errors = [abs(e) for e in errors if e is not None]
+        if valid_errors:
+            scale = float(np.percentile(valid_errors, 95))
+        else:
+            scale = 1.0
+        scale = max(scale, 1e-6)
+
+        for err in errors:
+            if err is None:
+                rewards.append(-1.0)
+                continue
+            x = err / scale
+            sim01 = 1.0 - min(x * x, 4.0) / 4.0  # clamp when |x| >= 2
+            r_mse = 2.0 * sim01 - 1.0
+            rewards.append(float(r_mse))
 
         return rewards
 

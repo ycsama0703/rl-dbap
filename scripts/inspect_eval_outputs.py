@@ -78,7 +78,7 @@ def main() -> None:
     args = ap.parse_args()
 
     print("[inspect] loading data...")
-    chat_inputs, y_true, quarters, ids = build_eval_inputs(args.test_path)
+    chat_inputs, y_true, quarters, ids, holding_ts = build_eval_inputs(args.test_path)
     total = len(chat_inputs)
     if args.limit is not None:
         total = min(total, args.limit)
@@ -86,6 +86,7 @@ def main() -> None:
         y_true = y_true[:total]
         quarters = quarters[:total]
         ids = ids[:total]
+        holding_ts = holding_ts[:total]
     print(f"[inspect] samples: {len(chat_inputs)}")
 
     print("[inspect] loading model...")
@@ -107,7 +108,8 @@ def main() -> None:
         pass
 
     for batch in iterator:
-        batch_msgs = [chat_inputs[i] for i in batch]
+        batch_indices = list(batch)
+        batch_msgs = [chat_inputs[i] for i in batch_indices]
         prompts = [
             tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
             for msgs in batch_msgs
@@ -122,19 +124,19 @@ def main() -> None:
             eos_token_id=tokenizer.eos_token_id,
         )
         prompt_lengths = enc["attention_mask"].sum(dim=1).tolist()
-        for seq, prompt_len in zip(generated, prompt_lengths):
+        for seq, prompt_len, idx in zip(generated, prompt_lengths, batch_indices):
             prompt_len = int(prompt_len)
             new_tokens = seq[prompt_len:]
             decoded = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
             raw_outputs.append(decoded)
-            preds.append(extract_pred(decoded))
+            preds.append(extract_pred(decoded, holding_ts[idx]))
 
     records: List[Dict[str, Any]] = []
     fail_count = 0
     ones_count = 0
 
-    for i, (idx, quarter, yt, raw, pred) in enumerate(
-        zip(ids, quarters, y_true, raw_outputs, preds)
+    for i, (idx, quarter, yt, ht, raw, pred) in enumerate(
+        zip(ids, quarters, y_true, holding_ts, raw_outputs, preds)
     ):
         parsed = pred
         if parsed is None:
@@ -146,6 +148,7 @@ def main() -> None:
                 "id": int(idx),
                 "quarter": quarter,
                 "y_true": yt,
+                "holding_t": ht,
                 "raw_output": raw,
                 "parsed_pred": parsed,
             }
@@ -159,7 +162,7 @@ def main() -> None:
     print("\n=== sample outputs ===")
     for rec in records[:5]:
         print(
-            f"id={rec['id']} quarter={rec['quarter']} y_true={rec['y_true']} parsed={rec['parsed_pred']}"
+            f"id={rec['id']} quarter={rec['quarter']} holding_t={rec['holding_t']} y_true={rec['y_true']} parsed={rec['parsed_pred']}"
         )
         print(rec["raw_output"])
         print("-" * 40)

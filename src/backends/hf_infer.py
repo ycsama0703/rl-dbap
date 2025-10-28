@@ -8,6 +8,7 @@ from peft import PeftModel
 
 _JSON_RE = re.compile(r'\{.*\}', re.S)
 _FLOAT_RE = re.compile(r'-?\d+(\.\d+)?([eE][+-]?\d+)?')
+_HOLDING_T_PATTERN = re.compile(r'Now,.*?holding\s*=\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)', re.S)
 
 
 def load_samples(fp: str):
@@ -44,21 +45,35 @@ def extract_y_true(assistant_content: str):
             return None
 
 
-def extract_pred(text: str):
+def extract_pred(text: str, holding_t: float | None = None):
     m = _JSON_RE.search(text)
     if m:
         try:
-            v = float(json.loads(m.group(0)).get("holding_tp1"))
-            if math.isfinite(v): return max(v, 0.0)
+            obj = json.loads(m.group(0))
+            if obj.get("holding_tp1") is not None:
+                v = float(obj.get("holding_tp1"))
+                if math.isfinite(v):
+                    return max(v, 0.0)
+            if obj.get("holding_delta") is not None and holding_t is not None:
+                delta = float(obj.get("holding_delta"))
+                if math.isfinite(delta) and math.isfinite(holding_t):
+                    v = holding_t + delta
+                    if math.isfinite(v):
+                        return max(v, 0.0)
         except Exception:
             pass
     m2 = _FLOAT_RE.search(text)
-    if not m2: return None
+    if not m2:
+        return None
     try:
         v = float(m2.group(0))
-        if math.isfinite(v): return max(v, 0.0)
+        if math.isfinite(v):
+            if holding_t is not None:
+                v = holding_t + v
+            return max(v, 0.0)
     except Exception:
         return None
+    return None
 
 
 def load_model_and_tokenizer(base_model: str, lora_path: str|None, torch_dtype="bfloat16"):
@@ -90,9 +105,20 @@ def infer_chat_batch(tokenizer, model, list_messages: List[List[Dict[str,str]]],
     return tokenizer.batch_decode(out, skip_special_tokens=True)
 
 
-def build_eval_inputs(test_path: str) -> Tuple[List[List[Dict[str,str]]], List[float], List[str], List[int]]:
+def parse_holding_t(user_text: str) -> float | None:
+    m = _HOLDING_T_PATTERN.search(user_text)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except Exception:
+        return None
+
+
+def build_eval_inputs(test_path: str) -> Tuple[List[List[Dict[str,str]]], List[float], List[str], List[int], List[float | None]]:
     rows = load_samples(test_path)
     chat_inputs, y_true, quarter, ids = [], [], [], []
+    holding_ts: List[float | None] = []
     for i, r in enumerate(rows):
         msgs = r["messages"]
         sys = next((m for m in msgs if m["role"]=="system"), None)
@@ -109,4 +135,5 @@ def build_eval_inputs(test_path: str) -> Tuple[List[List[Dict[str,str]]], List[f
         y_true.append(yt)
         quarter.append(parse_quarter_from_user(usr["content"]))
         ids.append(i)
-    return chat_inputs, y_true, quarter, ids
+        holding_ts.append(parse_holding_t(usr["content"]))
+    return chat_inputs, y_true, quarter, ids, holding_ts

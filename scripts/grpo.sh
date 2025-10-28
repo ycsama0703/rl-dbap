@@ -24,7 +24,7 @@ TEMPERATURE=0.9
 STOP_WORDS=""
 # 固定使用格式/数值奖励组合
 REWARD_FUNCS=(contract_holdings mse_holdings)
-REWARD_WEIGHTS=(0.3 0.7)
+REWARD_WEIGHTS=(0.4 0.6)
 
 while getopts ":m:d:o:g:l:a:r:vS:T:" opt; do
   case ${opt} in

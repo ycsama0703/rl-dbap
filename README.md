@@ -1,185 +1,185 @@
-ï»¿RL-DBAP: Prompted Holdings Prediction â€” Quick Guide
+RL-DBAP: Prompted Holdings Prediction ¡ª Quick Guide
 
-æ¦‚è§ˆ
-- ç›®æ ‡ï¼šæŠŠå­£åº¦æŒä»“é¢æ¿æ•°æ®è½¬æˆâ€œå†å²çª—å£å‹â€Promptsï¼Œå®Œæˆ SFT çƒ­èº«ã€GRPO å¼ºåŒ–è®­ç»ƒï¼Œå¹¶è¯„ä¼° MAE/IC ç­‰æŒ‡æ ‡ã€‚
-- æ ¸å¿ƒå…¥å£ï¼šä¸¥æ ¼æ¨¡æ¿ä¸åˆ†å±‚é‡‡æ ·ï¼ˆ`src/cli/build_history_prompts.py`ï¼‰ã€‚
+¸ÅÀÀ
+- Ä¿±ê£º°Ñ¼¾¶È³Ö²ÖÃæ°åÊı¾İ×ª³É¡°ÀúÊ·´°¿ÚĞÍ¡±Prompts£¬Íê³É SFT ÈÈÉí¡¢GRPO Ç¿»¯ÑµÁ·£¬²¢ÆÀ¹À MAE/IC µÈÖ¸±ê¡£
+- ºËĞÄÈë¿Ú£ºÑÏ¸ñÄ£°åÓë·Ö²ã²ÉÑù£¨`src/cli/build_history_prompts.py`£©¡£
 
-ä¸€æ­¥è·‘é€šï¼ˆä» clone åˆ°è¯„æµ‹ï¼‰
-- è·å–ä»£ç å¹¶è¿›å…¥ç›®å½•ï¼š
+Ò»²½ÅÜÍ¨£¨´Ó clone µ½ÆÀ²â£©
+- »ñÈ¡´úÂë²¢½øÈëÄ¿Â¼£º
   - `git clone <YOUR_REPO_URL> rl-dbap && cd rl-dbap`
-- å»ºç¯å¢ƒä¸ä¾èµ–ï¼ˆWindows PowerShellï¼‰ï¼š
+- ½¨»·¾³ÓëÒÀÀµ£¨Windows PowerShell£©£º
   - `python -m venv .venv && ./.venv/Scripts/Activate.ps1`
-  - å®‰è£… PyTorchï¼ˆä»»é€‰å…¶ä¸€ï¼‰ï¼š
-    - CUDA 12.1ï¼š`pip install --index-url https://download.pytorch.org/whl/cu121 torch torchvision torchaudio`
-    - CPUï¼š`pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio`
-  - å…¶ä½™ä¾èµ–ï¼š`pip install -r requirements.txt`
-- å¯é€‰ï¼šms-swift æºç /å›ºå®šè·¯å¾„å®‰è£…
-  - æºç å®‰è£…ï¼š`pip install git+https://github.com/modelscope/ms-swift.git`
-  - å›ºå®šè·¯å¾„å®‰è£…ï¼š
-    - `cd /workspace/rl-dbap` æ”¹æˆä½ è‡ªå·±çš„è·¯å¾„
-    - `rm -rf ./ms-swift` åˆ æ‰åŸå§‹ç©ºæ–‡ä»¶å¤¹
-    - `git clone https://github.com/modelscope/ms-swift.git ms-swift` ç›´æ¥cloneå°±è¡Œ
-- å¯é€‰ï¼šæå‰ä¸‹è½½åŸºç¡€æ¨¡å‹ï¼ˆç¦»çº¿/é™ç½‘æ—¶ï¼‰
+  - °²×° PyTorch£¨ÈÎÑ¡ÆäÒ»£©£º
+    - CUDA 12.1£º`pip install --index-url https://download.pytorch.org/whl/cu121 torch torchvision torchaudio`
+    - CPU£º`pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio`
+  - ÆäÓàÒÀÀµ£º`pip install -r requirements.txt`
+- ¿ÉÑ¡£ºms-swift Ô´Âë/¹Ì¶¨Â·¾¶°²×°
+  - Ô´Âë°²×°£º`pip install git+https://github.com/modelscope/ms-swift.git`
+  - ¹Ì¶¨Â·¾¶°²×°£º
+    - `cd /workspace/rl-dbap` ¸Ä³ÉÄã×Ô¼ºµÄÂ·¾¶
+    - `rm -rf ./ms-swift` É¾µôÔ­Ê¼¿ÕÎÄ¼ş¼Ğ
+    - `git clone https://github.com/modelscope/ms-swift.git ms-swift` Ö±½Óclone¾ÍĞĞ
+- ¿ÉÑ¡£ºÌáÇ°ÏÂÔØ»ù´¡Ä£ĞÍ£¨ÀëÏß/ÏŞÍøÊ±£©
   - `pip install "huggingface_hub[cli]"`
   - `huggingface-cli download Qwen/Qwen2.5-7B-Instruct --local-dir models/Qwen2.5-7B-Instruct --local-dir-use-symlinks False`
-- æ•°æ®å‡†å¤‡ï¼š
+- Êı¾İ×¼±¸£º
   - `python -m src.cli.prepare_data --config configs/data.yaml`
-- ç”Ÿæˆ promptsï¼š
-  - SFTï¼š`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_sft --date-end 2016-12-31`
-  - GRPOï¼š`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_grpo --date-start 2017-01-01 --date-end 2018-12-31`
-  - Testï¼š`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_test --date-start 2019-01-01`
-- è½¬æ¢ï¼š
+- Éú³É prompts£º
+  - SFT£º`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_sft --date-end 2016-12-31`
+  - GRPO£º`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_grpo --date-start 2017-01-01 --date-end 2018-12-31`
+  - Test£º`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_test --date-start 2019-01-01`
+- ×ª»»£º
   - `python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft --out artifacts/sft/sft_train.jsonl`
-  - `python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo --out artifacts/grpo/grpo.jsonl`ï¼ˆé»˜è®¤æ’å…¥æ— æŸå¤± `<think>` ç¤ºèŒƒï¼Œå¯åŠ  `--no-think-example` å…³é—­ï¼‰
+  - `python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo --out artifacts/grpo/grpo.jsonl`£¨Ä¬ÈÏ²åÈëÎŞËğÊ§ `<think>` Ê¾·¶£¬¿É¼Ó `--no-think-example` ¹Ø±Õ£©
   - `python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test --out artifacts/sft/test.jsonl`
 
-Ò»æ¡å‘½ä»¤ç”Ÿæˆå•ä¸€ç±»å‹æ•°æ®é›†ï¼ˆå«éé›¶è¿‡æ»¤ï¼‰
-- è¯´æ˜ï¼šä¸ºæŸä¸ª firm type ä¸€æ¬¡æ€§ç”Ÿæˆä¸‰ä»½ promptsï¼ˆSFT/GRPO/Testï¼‰ï¼Œå¹¶è½¬æˆæœ€ç»ˆæ•°æ®é›†ï¼ˆSFT/GRPO/Testï¼‰ã€‚é»˜è®¤æ—¶é—´åˆ‡åˆ†ï¼šSFT â‰¤ 2016-12-31ï¼ŒGRPO 2017-01-01â€“2018-12-31ï¼ŒTest â‰¥ 2019-01-01ã€‚
-- ç¤ºä¾‹ï¼ˆBanksï¼Œè¿‡æ»¤ t=0 ä¸”æ¯åˆ†å‰²å„ 1000 æ¡ï¼‰ï¼š
+?ÌõÃüÁîÉú³Éµ¥Ò»ÀàĞÍÊı¾İ¼¯£¨º¬·ÇÁã¹ıÂË£©
+- ËµÃ÷£ºÎªÄ³¸ö firm type Ò»´ÎĞÔÉú³ÉÈı·İ prompts£¨SFT/GRPO/Test£©£¬²¢×ª³É×îÖÕÊı¾İ¼¯£¨SFT/GRPO/Test£©¡£Ä¬ÈÏÊ±¼äÇĞ·Ö£ºSFT ¡Ü 2016-12-31£¬GRPO 2017-01-01¨C2018-12-31£¬Test ¡İ 2019-01-01¡£
+- Ê¾Àı£¨Banks£¬¹ıÂË t=0 ÇÒÃ¿·Ö¸î¸÷ 1000 Ìõ£©£º
   - `python -m src.cli.build_type_datasets --type banks --per-type-limit 1000 --exclude-zero-holding-t`
-- å¯é€‰å‚æ•°ï¼š
-  - ä¿®æ”¹æ—¶é—´åˆ‡åˆ†ï¼š`--sft-end 2016-12-31 --grpo-start 2017-01-01 --grpo-end 2018-12-31 --test-start 2019-01-01`
-  - å…è®¸ t=0ï¼šä½¿ç”¨ `--include-zero-holding-t`ï¼ˆé»˜è®¤æ’é™¤ï¼‰
-  - SFT è½¬æ¢åŒ…å«æ— æŸ `<think>`ï¼š`--sft-with-think`
-  - GRPO ä¸æ’å…¥æ— æŸ `<think>` ç¤ºä¾‹ï¼š`--grpo-no-think-example`
+- ¿ÉÑ¡²ÎÊı£º
+  - ĞŞ¸ÄÊ±¼äÇĞ·Ö£º`--sft-end 2016-12-31 --grpo-start 2017-01-01 --grpo-end 2018-12-31 --test-start 2019-01-01`
+  - ÔÊĞí t=0£ºÊ¹ÓÃ `--include-zero-holding-t`£¨Ä¬ÈÏÅÅ³ı£©
+  - SFT ×ª»»°üº¬ÎŞËğ `<think>`£º`--sft-with-think`
+  - GRPO ²»²åÈëÎŞËğ `<think>` Ê¾Àı£º`--grpo-no-think-example`
 
-Banks éé›¶æŒä»“æŠ½æ ·ï¼ˆ1000 æ¡ï¼‰ç¤ºä¾‹æµç¨‹
-- ç›®æ ‡ï¼šä¸¥æ ¼æŒ‰æ—¶é—´åˆ‡åˆ†ï¼Œé’ˆå¯¹ Banks æŠ½å–æ¯ä¸ªåˆ†å‰²å„ 1000 æ¡ä¸” t æ—¶åˆ»æŒä»“ä¸ä¸º 0 çš„æ ·æœ¬ã€‚
-- ç”Ÿæˆ promptsï¼ˆå¸¦éé›¶è¿‡æ»¤å¼€å…³ï¼‰ï¼š
-  - SFTï¼ˆâ‰¤ 2016-12-31ï¼‰ï¼š
+Banks ·ÇÁã³Ö²Ö³éÑù£¨1000 Ìõ£©Ê¾ÀıÁ÷³Ì
+- Ä¿±ê£ºÑÏ¸ñ°´Ê±¼äÇĞ·Ö£¬Õë¶Ô Banks ³éÈ¡Ã¿¸ö·Ö¸î¸÷ 1000 ÌõÇÒ t Ê±¿Ì³Ö²Ö²»Îª 0 µÄÑù±¾¡£
+- Éú³É prompts£¨´ø·ÇÁã¹ıÂË¿ª¹Ø£©£º
+  - SFT£¨¡Ü 2016-12-31£©£º
     - `python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_sft --include-types banks --per-type-limit 1000 --date-end 2016-12-31 --exclude-zero-holding-t`
-  - GRPOï¼ˆ2017-01-01â€“2018-12-31ï¼‰ï¼š
+  - GRPO£¨2017-01-01¨C2018-12-31£©£º
     - `python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_grpo --include-types banks --per-type-limit 1000 --date-start 2017-01-01 --date-end 2018-12-31 --exclude-zero-holding-t`
-  - Testï¼ˆâ‰¥ 2019-01-01ï¼‰ï¼š
+  - Test£¨¡İ 2019-01-01£©£º
     - `python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_test --include-types banks --per-type-limit 1000 --date-start 2019-01-01 --exclude-zero-holding-t`
-- è½¬æ¢ä¸ºæœ€ç»ˆæ•°æ®é›†ï¼š
-  - SFTï¼š`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft/banks.jsonl --out artifacts/sft/sft_train_banks.jsonl`
-  - GRPOï¼š`python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo/banks.jsonl --out artifacts/grpo/grpo_banks.jsonl`
-  - Testï¼š`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test/banks.jsonl --out artifacts/test/test_banks.jsonl`
-- å¿«é€Ÿæ ¡éªŒï¼ˆPowerShellï¼‰ï¼š
-  - è®¡æ•°ï¼š`Get-Content artifacts/prompts_hist_sft/banks.jsonl | Measure-Object | % Count`
-  - éé›¶ï¼š`Get-Content artifacts/prompts_hist_sft/banks.jsonl | % { $o = $_ | ConvertFrom-Json; if ([double]$o.holding_t -eq 0) { throw 'found zero in SFT' } }`
-  - æ³¨ï¼šé‡‡æ ·å™¨ä¼šåœ¨æ—¶é—´æ¡¶é…é¢ä¸è¶³æ—¶å›å¡«ï¼Œå°½é‡å‡‘æ»¡ 1000ï¼›è‹¥éé›¶çª—å£æ€»ä½“ä¸è¶³ï¼Œå°†ä½äºé…é¢ã€‚
-- è®­ç»ƒï¼š
-  - SFTï¼š`powershell .\scripts\sft.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/sft/sft_train.jsonl" -OutputDir "outputs/sft_qwen2.5_7b"`
-- GRPOï¼š`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512`
-- è¯„æµ‹ï¼š
-- Baseï¼š`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path None --out_dir artifacts/eval_base`
-- SFTï¼š`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/sft_qwen2.5_7b --out_dir artifacts/eval_sft --post_csv_for_compare artifacts/eval_base/pred_detail.csv`
-- GRPOï¼š`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/grpo_qwen2.5_7b --out_dir artifacts/eval_grpo --post_csv_for_compare artifacts/eval_base/pred_detail.csv`
+- ×ª»»Îª×îÖÕÊı¾İ¼¯£º
+  - SFT£º`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft/banks.jsonl --out artifacts/sft/sft_train_banks.jsonl`
+  - GRPO£º`python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo/banks.jsonl --out artifacts/grpo/grpo_banks.jsonl`
+  - Test£º`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test/banks.jsonl --out artifacts/test/test_banks.jsonl`
+- ¿ìËÙĞ£Ñé£¨PowerShell£©£º
+  - ¼ÆÊı£º`Get-Content artifacts/prompts_hist_sft/banks.jsonl | Measure-Object | % Count`
+  - ·ÇÁã£º`Get-Content artifacts/prompts_hist_sft/banks.jsonl | % { $o = $_ | ConvertFrom-Json; if ([double]$o.holding_t -eq 0) { throw 'found zero in SFT' } }`
+  - ×¢£º²ÉÑùÆ÷»áÔÚÊ±¼äÍ°Åä¶î²»×ãÊ±»ØÌî£¬¾¡Á¿´ÕÂú 1000£»Èô·ÇÁã´°¿Ú×ÜÌå²»×ã£¬½«µÍÓÚÅä¶î¡£
+- ÑµÁ·£º
+  - SFT£º`powershell .\scripts\sft.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/sft/sft_train.jsonl" -OutputDir "outputs/sft_qwen2.5_7b"`
+- GRPO£º`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512`
+- ÆÀ²â£º
+- Base£º`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path None --out_dir artifacts/eval_base`
+- SFT£º`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/sft_qwen2.5_7b --out_dir artifacts/eval_sft --post_csv_for_compare artifacts/eval_base/pred_detail.csv`
+- GRPO£º`python -m src.cli.run_eval --test_path artifacts/sft/test.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/grpo_qwen2.5_7b --out_dir artifacts/eval_grpo --post_csv_for_compare artifacts/eval_base/pred_detail.csv`
 
-æ¨ç†ä¸ç»“æœåˆ†æ
-- å¯¼å‡ºæ¨ç† promptsï¼š`python scripts/export_infer_prompts.py --in artifacts/sft/test.jsonl --out-dir artifacts/test --stem test`ï¼ˆç”Ÿæˆ base/GRPO ä¸¤ä»½ `id/system/prompt` JSONLï¼‰
-- å•æ¡è°ƒè¯•ï¼š`python scripts/infer_grpo.py --base_model Qwen/Qwen2.5-7B-Instruct --checkpoint output/grpo_qwen2.5_7b/<run>/checkpoint-1000 --jsonl artifacts/test/test_prompts_grpo.jsonl --index 0`ï¼ˆ`--checkpoint None` å¯å¯¹æ¯”åŸå§‹æ¨¡å‹ï¼›åŒæ ·æ”¯æŒ `--prompt`/`--prompt_file`ï¼‰
-- æ‰¹é‡æ¨ç†ï¼š`python scripts/batch_infer.py --jsonl artifacts/test/test_prompts_grpo.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --checkpoint output/grpo_qwen2.5_7b/<run>/checkpoint-1000 --labels artifacts/sft/test.jsonl --out_jsonl artifacts/test/grpo_outputs.jsonl --out_csv artifacts/test/grpo_outputs.csv --plot_dir artifacts/test/grpo_plots --progress_log_steps 100`
-  - è„šæœ¬è‡ªåŠ¨è§£æ `<think>/<answer>`ã€æå– `holding_tp1`ï¼Œå¹¶ä¸çœŸå®æ ‡ç­¾å¯¹é½è¾“å‡º JSONL/CSVï¼›æä¾› `--plot_dir` ä¼šé¢å¤–ç”Ÿæˆæ®‹å·®ç›´æ–¹å›¾ã€é¢„æµ‹å¯¹æ¯”æ•£ç‚¹ä¸æ¨ç†ä¸­ MAE/RMSE æ›²çº¿ã€‚
-  - è¿›åº¦è¾“å‡ºæŒ‰ `--progress_log_steps` å±•ç¤ºè¦†ç›–ç‡ä¸è¿è¡Œ MAE/RMSEï¼Œæ–¹ä¾¿ç›‘æ§å¤§æ‰¹é‡æ¨ç†ã€‚
+ÍÆÀíÓë½á¹û·ÖÎö
+- µ¼³öÍÆÀí prompts£º`python scripts/export_infer_prompts.py --in artifacts/sft/test.jsonl --out-dir artifacts/test --stem test`£¨Éú³É base/GRPO Á½·İ `id/system/prompt` JSONL£©
+- µ¥Ìõµ÷ÊÔ£º`python scripts/infer_grpo.py --base_model Qwen/Qwen2.5-7B-Instruct --checkpoint output/grpo_qwen2.5_7b/<run>/checkpoint-1000 --jsonl artifacts/test/test_prompts_grpo.jsonl --index 0`£¨`--checkpoint None` ¿É¶Ô±ÈÔ­Ê¼Ä£ĞÍ£»Í¬ÑùÖ§³Ö `--prompt`/`--prompt_file`£©
+- ÅúÁ¿ÍÆÀí£º`python scripts/batch_infer.py --jsonl artifacts/test/test_prompts_grpo.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --checkpoint output/grpo_qwen2.5_7b/<run>/checkpoint-1000 --labels artifacts/sft/test.jsonl --out_jsonl artifacts/test/grpo_outputs.jsonl --out_csv artifacts/test/grpo_outputs.csv --plot_dir artifacts/test/grpo_plots --progress_log_steps 100`
+  - ½Å±¾×Ô¶¯½âÎö `<think>/<answer>`¡¢ÌáÈ¡ `holding_tp1`£¬²¢ÓëÕæÊµ±êÇ©¶ÔÆëÊä³ö JSONL/CSV£»Ìá¹© `--plot_dir` »á¶îÍâÉú³É²Ğ²îÖ±·½Í¼¡¢Ô¤²â¶Ô±ÈÉ¢µãÓëÍÆÀíÖĞ MAE/RMSE ÇúÏß¡£
+  - ½ø¶ÈÊä³ö°´ `--progress_log_steps` Õ¹Ê¾¸²¸ÇÂÊÓëÔËĞĞ MAE/RMSE£¬·½±ã¼à¿Ø´óÅúÁ¿ÍÆÀí¡£
 
-ç¯å¢ƒå®‰è£…ï¼ˆå®Œæ•´è¯´æ˜ï¼‰
-- Windowsï¼ˆPowerShellï¼‰ï¼šè§ä¸Šæ–‡â€œä¸€æ­¥è·‘é€šâ€ã€‚
-- Linux/macOSï¼š
+»·¾³°²×°£¨ÍêÕûËµÃ÷£©
+- Windows£¨PowerShell£©£º¼ûÉÏÎÄ¡°Ò»²½ÅÜÍ¨¡±¡£
+- Linux/macOS£º
   - `python3 -m venv .venv && source .venv/bin/activate`
-  - å‚ç…§ https://pytorch.org å®‰è£…é€‚é…çš„ `torch/torchvision/torchaudio`
+  - ²ÎÕÕ https://pytorch.org °²×°ÊÊÅäµÄ `torch/torchvision/torchaudio`
   - `pip install -r requirements.txt`
-- ms-swiftï¼š`pip install ms-swift` æˆ– `pip install git+https://github.com/modelscope/ms-swift.git`
-- å¿«é€Ÿæ ¡éªŒï¼š`swift --help`ã€`swift sft --help` å¯è¿è¡Œã€‚
+- ms-swift£º`pip install ms-swift` »ò `pip install git+https://github.com/modelscope/ms-swift.git`
+- ¿ìËÙĞ£Ñé£º`swift --help`¡¢`swift sft --help` ¿ÉÔËĞĞ¡£
 
-åŸºç¡€æ¨¡å‹ä¸‹è½½ä¸åŠ è½½
-- åœ¨çº¿ï¼šé¦–æ¬¡è¿è¡Œè‡ªåŠ¨æ‹‰å–ã€‚
-- ç¦»çº¿ï¼šä½¿ç”¨ huggingface_hub ä¸‹è½½åˆ° `models/Qwen2.5-7B-Instruct` å¹¶åœ¨è®­ç»ƒ/è¯„æµ‹å‘½ä»¤ä¸­æŠŠ `-Model/--base_model` æ”¹ä¸ºè¯¥ç›®å½•ã€‚
-- ç¼“å­˜ï¼šå¯è®¾ç½® `HF_HOME` é¿å…é‡å¤ä¸‹è½½ã€‚
+»ù´¡Ä£ĞÍÏÂÔØÓë¼ÓÔØ
+- ÔÚÏß£ºÊ×´ÎÔËĞĞ×Ô¶¯À­È¡¡£
+- ÀëÏß£ºÊ¹ÓÃ huggingface_hub ÏÂÔØµ½ `models/Qwen2.5-7B-Instruct` ²¢ÔÚÑµÁ·/ÆÀ²âÃüÁîÖĞ°Ñ `-Model/--base_model` ¸ÄÎª¸ÃÄ¿Â¼¡£
+- »º´æ£º¿ÉÉèÖÃ `HF_HOME` ±ÜÃâÖØ¸´ÏÂÔØ¡£
 
-æ•°æ®ä¸ Prompt ç”Ÿæˆ
-- å‡†å¤‡æ•°æ®ï¼š`python -m src.cli.prepare_data --config configs/data.yaml`
-- ä¸¥æ ¼æ¨¡æ¿ Promptsï¼š
+Êı¾İÓë Prompt Éú³É
+- ×¼±¸Êı¾İ£º`python -m src.cli.prepare_data --config configs/data.yaml`
+- ÑÏ¸ñÄ£°å Prompts£º
   - `python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist --per-type-limit 1000 --time-bins 10 --cap-per-pair 3 --seed 42 --use-tqdm`
-- è‡ªåŠ¨å…¬å¸åæ˜ å°„ï¼šä» `data/ticker_mapping.csv` è¯»å–ï¼Œå°† `Ticker: {permno}` æ›¿æ¢ä¸º `Ticker: {TICKERæˆ–PERMNO} | Company: {COMNAM}`ã€‚
+- ×Ô¶¯¹«Ë¾ÃûÓ³Éä£º´Ó `data/ticker_mapping.csv` ¶ÁÈ¡£¬½« `Ticker: {permno}` Ìæ»»Îª `Ticker: {TICKER»òPERMNO} | Company: {COMNAM}`¡£
 
-è½¬æ¢ä¸ºè®­ç»ƒ/è¯„æµ‹é›†
-- SFTï¼š`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft --out artifacts/sft/sft_train.jsonl [--with-think]`
-- GRPOï¼š`python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo --out artifacts/grpo/grpo.jsonl`ï¼ˆé»˜è®¤æ’å…¥æ— æŸå¤± `<think>` ç¤ºèŒƒï¼Œå¯åŠ  `--no-think-example` å…³é—­ï¼‰
-- Testï¼š`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test --out artifacts/sft/test.jsonl`
+×ª»»ÎªÑµÁ·/ÆÀ²â¼¯
+- SFT£º`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft --out artifacts/sft/sft_train.jsonl [--with-think]`
+- GRPO£º`python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo --out artifacts/grpo/grpo.jsonl`£¨Ä¬ÈÏ²åÈëÎŞËğÊ§ `<think>` Ê¾·¶£¬¿É¼Ó `--no-think-example` ¹Ø±Õ£©
+- Test£º`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test --out artifacts/sft/test.jsonl`
 
-è®­ç»ƒä¸è¯„ä¼°ï¼ˆç»†åŒ–ï¼‰
-- SFTï¼ˆLoRAï¼‰ï¼šè§ä¸Šæ–‡â€œä¸€æ­¥è·‘é€šâ€ã€‚
-- GRPOï¼ˆLoRAï¼‰ï¼š`scripts/grpo.sh` ä¸ `scripts/grpo.ps1` å›ºå®šä½¿ç”¨ `contract_holdings`+`mse_holdings` çš„ 0.3/0.7 è”åˆå¥–åŠ±ï¼Œå¤–éƒ¨æ’ä»¶è·¯å¾„å›ºå®šä¸º `src/plugins/grpo/holdings_plugin.py`ã€‚
-- è¯„ä¼°äº§ç‰©ï¼š`metrics.csv`ã€`pred_detail.csv`ã€`residual_hist.png`ã€`ic_by_quarter.png`ã€‚
+ÑµÁ·ÓëÆÀ¹À£¨Ï¸»¯£©
+- SFT£¨LoRA£©£º¼ûÉÏÎÄ¡°Ò»²½ÅÜÍ¨¡±¡£
+- GRPO£¨LoRA£©£º`scripts/grpo.sh` Óë `scripts/grpo.ps1` ¹Ì¶¨Ê¹ÓÃ `contract_holdings`+`mse_holdings` µÄ 0.4/0.6 ÁªºÏ½±Àø£¬Íâ²¿²å¼şÂ·¾¶¹Ì¶¨Îª `src/plugins/grpo/holdings_plugin.py`¡£
+- ÆÀ¹À²úÎï£º`metrics.csv`¡¢`pred_detail.csv`¡¢`residual_hist.png`¡¢`ic_by_quarter.png`¡£
 
-æ¨¡å—èŒè´£ä¸€è§ˆ
-- `src/cli/prepare_data.py`ï¼šå¯¹é½åˆ°å­£åº¦ã€ç”Ÿæˆæ ‡ç­¾ï¼Œè¾“å‡º parquet é¢æ¿
-- `src/cli/build_history_prompts.py`ï¼šé‡‡æ ·ã€æ„é€ ä¸¥æ ¼æ¨¡æ¿ t-3..t çª—å£å‹ promptï¼ˆè‡ªåŠ¨å…¬å¸åæ˜ å°„ï¼‰
-- `src/prompts/sampler.py`ï¼šè¿ç»­çª—å£ä¸åˆ†å±‚æ—¶é—´æ¡¶é‡‡æ ·
-- `src/prompts/builder.py`ï¼šä¸¥æ ¼æ¨¡æ¿ prompt æ‹¼è£…ã€åè¿›åˆ¶æ ¼å¼ã€è¾“å‡ºå¥‘çº¦
-- `src/cli/prompts_to_sft.py`ï¼šå°† prompts è½¬ä¸º SFT chat æ ¼å¼ï¼ˆå¯é€‰ `<think>` ä¸è®¡æŸï¼‰
-- `src/cli/prompts_to_grpo.py`ï¼šå°† prompts è½¬ä¸º GRPO æ•°æ®ï¼ˆmessages + labelsï¼‰
-- `src/plugins/grpo/holdings_plugin.py`ï¼šè‡ªå®šä¹‰å¥–åŠ±ï¼ˆ`mse_holdings`ã€`contract_holdings`ã€`external_holdings`ï¼‰
-- `scripts/sft.ps1`ã€`scripts/grpo.ps1`ï¼šè®­ç»ƒè„šæœ¬ï¼ˆmsâ€‘swift CLIï¼‰
-- `src/cli/run_eval.py`ã€`src/backends/hf_infer.py`ï¼šè¯„æµ‹ä¸æ¨ç†
+Ä£¿éÖ°ÔğÒ»ÀÀ
+- `src/cli/prepare_data.py`£º¶ÔÆëµ½¼¾¶È¡¢Éú³É±êÇ©£¬Êä³ö parquet Ãæ°å
+- `src/cli/build_history_prompts.py`£º²ÉÑù¡¢¹¹ÔìÑÏ¸ñÄ£°å t-3..t ´°¿ÚĞÍ prompt£¨×Ô¶¯¹«Ë¾ÃûÓ³Éä£©
+- `src/prompts/sampler.py`£ºÁ¬Ğø´°¿ÚÓë·Ö²ãÊ±¼äÍ°²ÉÑù
+- `src/prompts/builder.py`£ºÑÏ¸ñÄ£°å prompt Æ´×°¡¢Ê®½øÖÆ¸ñÊ½¡¢Êä³öÆõÔ¼
+- `src/cli/prompts_to_sft.py`£º½« prompts ×ªÎª SFT chat ¸ñÊ½£¨¿ÉÑ¡ `<think>` ²»¼ÆËğ£©
+- `src/cli/prompts_to_grpo.py`£º½« prompts ×ªÎª GRPO Êı¾İ£¨messages + labels£©
+- `src/plugins/grpo/holdings_plugin.py`£º×Ô¶¨Òå½±Àø£¨`mse_holdings`¡¢`contract_holdings`¡¢`external_holdings`£©
+- `scripts/sft.ps1`¡¢`scripts/grpo.ps1`£ºÑµÁ·½Å±¾£¨ms?swift CLI£©
+- `src/cli/run_eval.py`¡¢`src/backends/hf_infer.py`£ºÆÀ²âÓëÍÆÀí
 
-æç¤º
-- è¯„æµ‹è§£æä¼˜å…ˆé€‰å– messages ä¸­ `loss=True` çš„ assistant ä½œä¸ºæ ‡ç­¾/å¯¹é½å¯¹è±¡ï¼Œå¿½ç•¥ `<think>`ã€‚
+ÌáÊ¾
+- ÆÀ²â½âÎöÓÅÏÈÑ¡È¡ messages ÖĞ `loss=True` µÄ assistant ×÷Îª±êÇ©/¶ÔÆë¶ÔÏó£¬ºöÂÔ `<think>`¡£
 
-ä¸€æ¡å‘½ä»¤ï¼šæŒ‰æŠ•èµ„è€…ç±»å‹ SFT+GRPO ç®¡é“
-- Linux/macOSï¼š
+Ò»ÌõÃüÁî£º°´Í¶×ÊÕßÀàĞÍ SFT+GRPO ¹ÜµÀ
+- Linux/macOS£º
   - `bash scripts/run_per_type.sh -t banks -m "Qwen/Qwen2.5-7B-Instruct" -sft_end 2016-12-31 -grpo_start 2017-01-01 -grpo_end 2018-12-31 -g 4 -l 512`
-  - è‡ªåŠ¨æ‰§è¡Œï¼šæ„å»º perâ€‘type SFT prompts â†’ è½¬ SFT jsonl â†’ è¿è¡Œ SFTï¼›æ„å»º perâ€‘type GRPO prompts â†’ è½¬ GRPO jsonl â†’ ä»¥ SFT é€‚é…å™¨ä¸ºèµ·ç‚¹è¿è¡Œ GRPOã€‚
-- Windows/PowerShellï¼š
+  - ×Ô¶¯Ö´ĞĞ£º¹¹½¨ per?type SFT prompts ¡ú ×ª SFT jsonl ¡ú ÔËĞĞ SFT£»¹¹½¨ per?type GRPO prompts ¡ú ×ª GRPO jsonl ¡ú ÒÔ SFT ÊÊÅäÆ÷ÎªÆğµãÔËĞĞ GRPO¡£
+- Windows/PowerShell£º
   - `powershell .\scripts\run_per_type.ps1 -Type banks -Model "Qwen/Qwen2.5-7B-Instruct" -SftEnd "2016-12-31" -GrpoStart "2017-01-01" -GrpoEnd "2018-12-31" -NumGenerations 4 -MaxCompletionLen 512`
-  - åŒæ ·ä¸²è”æ‰§è¡Œ perâ€‘type çš„ SFT ä¸ GRPOã€‚
+  - Í¬Ñù´®ÁªÖ´ĞĞ per?type µÄ SFT Óë GRPO¡£
 
-æœ€ç®€è®­ç»ƒï¼ˆä»…è®­ç»ƒï¼Œæ•°æ®å·²å¤‡ï¼‰
-- åœºæ™¯ï¼šå·²å­˜åœ¨ perâ€‘type çš„ SFT ä¸ GRPO æ•°æ®é›†ï¼ˆå¦‚ `artifacts/sft/sft_train_banks.jsonl`ã€`artifacts/grpo/grpo_banks.jsonl`ï¼‰ã€‚
-- Linux/macOSï¼š
+×î¼òÑµÁ·£¨½öÑµÁ·£¬Êı¾İÒÑ±¸£©
+- ³¡¾°£ºÒÑ´æÔÚ per?type µÄ SFT Óë GRPO Êı¾İ¼¯£¨Èç `artifacts/sft/sft_train_banks.jsonl`¡¢`artifacts/grpo/grpo_banks.jsonl`£©¡£
+- Linux/macOS£º
   - `bash scripts/train_per_type.sh -t banks -m "Qwen/Qwen2.5-7B-Instruct"`
-- Windows/PowerShellï¼š
+- Windows/PowerShell£º
   - `powershell .\scripts\train_per_type.ps1 -Type banks -Model "Qwen/Qwen2.5-7B-Instruct"`
-- è¯´æ˜ï¼šè„šæœ¬é»˜è®¤è¯»å– `artifacts/sft/sft_train_<TYPE>.jsonl` ä¸ `artifacts/grpo/grpo_<TYPE>.jsonl`ï¼Œå…ˆè¿è¡Œ SFT è¾“å‡ºåˆ° `outputs/sft_<TYPE>`ï¼Œéšåä»¥è¯¥ SFT é€‚é…å™¨ä¸ºèµ·ç‚¹è¿è¡Œ GRPOï¼Œè¾“å‡ºåˆ° `outputs/grpo_<TYPE>`ã€‚
+- ËµÃ÷£º½Å±¾Ä¬ÈÏ¶ÁÈ¡ `artifacts/sft/sft_train_<TYPE>.jsonl` Óë `artifacts/grpo/grpo_<TYPE>.jsonl`£¬ÏÈÔËĞĞ SFT Êä³öµ½ `outputs/sft_<TYPE>`£¬ËæºóÒÔ¸Ã SFT ÊÊÅäÆ÷ÎªÆğµãÔËĞĞ GRPO£¬Êä³öµ½ `outputs/grpo_<TYPE>`¡£
 
-GRPO æ‰¿æ¥ SFT ä¸æ–­ç‚¹ç»­è®­ï¼ˆè¡¥å……ï¼‰
-- ä» SFT LoRA ç»§ç»­åš GRPOï¼š
-  - PowerShellï¼š`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512 -Adapters "outputs/sft_qwen2.5_7b"`
-  - Bashï¼š`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512 -a outputs/sft_qwen2.5_7b`
-- GRPO æ–­ç‚¹ç»­è®­ï¼š
-  - PowerShellï¼š`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512 -ResumeFrom "outputs/grpo_qwen2.5_7b/checkpoint-1000"`
-  - Bashï¼š`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512 -r outputs/grpo_qwen2.5_7b/checkpoint-1000`
+GRPO ³Ğ½Ó SFT Óë¶ÏµãĞøÑµ£¨²¹³ä£©
+- ´Ó SFT LoRA ¼ÌĞø×ö GRPO£º
+  - PowerShell£º`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512 -Adapters "outputs/sft_qwen2.5_7b"`
+  - Bash£º`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512 -a outputs/sft_qwen2.5_7b`
+- GRPO ¶ÏµãĞøÑµ£º
+  - PowerShell£º`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 4 -MaxCompletionLen 512 -ResumeFrom "outputs/grpo_qwen2.5_7b/checkpoint-1000"`
+  - Bash£º`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512 -r outputs/grpo_qwen2.5_7b/checkpoint-1000`
 
-æŒ‰æŠ•èµ„è€…ç±»å‹ï¼ˆperâ€‘typeï¼‰è®­ç»ƒ
-- åœºæ™¯ï¼šå¸Œæœ›æ•æ‰ä¸åŒæŠ•èµ„è€…ç±»å‹çš„å·®å¼‚ï¼Œæ¯æ¬¡è®­ç»ƒä»…ä½¿ç”¨å•ä¸€ç±»å‹çš„æ•°æ®ï¼ˆSFT ä¸ GRPO çš†å¯ï¼‰ã€‚
-- æ­¥éª¤ï¼ˆä»¥ `banks` ä¸ºä¾‹ï¼‰ï¼š
-  1) åªä¸ºè¯¥ç±»å‹ç”Ÿæˆ promptsï¼ˆæŒ‰éœ€åˆ‡åˆ†æ—¶é—´ï¼‰
-     - SFTï¼š`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_sft --include-types banks --date-end 2016-12-31`
-     - GRPOï¼š`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_grpo --include-types banks --date-start 2017-01-01 --date-end 2018-12-31`
-  2) ä»…è½¬æ¢è¯¥ç±»å‹çš„ jsonl ä¸ºè®­ç»ƒé›†
-     - SFTï¼š`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft/banks.jsonl --out artifacts/sft/sft_train_banks.jsonl`
-     - GRPOï¼š`python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo/banks.jsonl --out artifacts/grpo/grpo_banks.jsonl`
-  3) ä½¿ç”¨ perâ€‘type æ•°æ®å¯åŠ¨è®­ç»ƒ
-     - Windows/PSï¼ˆSFTï¼‰ï¼š`powershell .\scripts\sft.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/sft/sft_train_banks.jsonl" -OutputDir "outputs/sft_banks"`
-     - Windows/PSï¼ˆGRPOï¼‰ï¼š`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo_banks.jsonl" -OutputDir "outputs/grpo_banks" -NumGenerations 4 -MaxCompletionLen 512`
-     - Linux/macOSï¼ˆSFTï¼‰ï¼š`bash scripts/sft.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/sft/sft_train_banks.jsonl -o outputs/sft_banks`
-     - Linux/macOSï¼ˆGRPOï¼‰ï¼š`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo_banks.jsonl -o outputs/grpo_banks -g 4 -l 512`
-  4) æŒ‰ç±»å‹è¯„æµ‹ï¼ˆå¯é€‰ï¼Œä»… banksï¼‰
-     - ç”Ÿæˆæµ‹è¯•é›†ï¼ˆä»… banksï¼‰ï¼š`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_test_banks --include-types banks --date-start 2019-01-01`
-     - è½¬æ¢ï¼š`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test_banks/banks.jsonl --out artifacts/sft/test_banks.jsonl`
-     - è¯„æµ‹ï¼š`python -m src.cli.run_eval --test_path artifacts/sft/test_banks.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/sft_banks --out_dir artifacts/eval_sft_banks`
+°´Í¶×ÊÕßÀàĞÍ£¨per?type£©ÑµÁ·
+- ³¡¾°£ºÏ£Íû²¶×½²»Í¬Í¶×ÊÕßÀàĞÍµÄ²îÒì£¬Ã¿´ÎÑµÁ·½öÊ¹ÓÃµ¥Ò»ÀàĞÍµÄÊı¾İ£¨SFT Óë GRPO ½Ô¿É£©¡£
+- ²½Öè£¨ÒÔ `banks` ÎªÀı£©£º
+  1) Ö»Îª¸ÃÀàĞÍÉú³É prompts£¨°´ĞèÇĞ·ÖÊ±¼ä£©
+     - SFT£º`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_sft --include-types banks --date-end 2016-12-31`
+     - GRPO£º`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_grpo --include-types banks --date-start 2017-01-01 --date-end 2018-12-31`
+  2) ½ö×ª»»¸ÃÀàĞÍµÄ jsonl ÎªÑµÁ·¼¯
+     - SFT£º`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_sft/banks.jsonl --out artifacts/sft/sft_train_banks.jsonl`
+     - GRPO£º`python -m src.cli.prompts_to_grpo --in artifacts/prompts_hist_grpo/banks.jsonl --out artifacts/grpo/grpo_banks.jsonl`
+  3) Ê¹ÓÃ per?type Êı¾İÆô¶¯ÑµÁ·
+     - Windows/PS£¨SFT£©£º`powershell .\scripts\sft.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/sft/sft_train_banks.jsonl" -OutputDir "outputs/sft_banks"`
+     - Windows/PS£¨GRPO£©£º`powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo_banks.jsonl" -OutputDir "outputs/grpo_banks" -NumGenerations 4 -MaxCompletionLen 512`
+     - Linux/macOS£¨SFT£©£º`bash scripts/sft.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/sft/sft_train_banks.jsonl -o outputs/sft_banks`
+     - Linux/macOS£¨GRPO£©£º`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo_banks.jsonl -o outputs/grpo_banks -g 4 -l 512`
+  4) °´ÀàĞÍÆÀ²â£¨¿ÉÑ¡£¬½ö banks£©
+     - Éú³É²âÊÔ¼¯£¨½ö banks£©£º`python -m src.cli.build_history_prompts --in-dir data/processed/panel_quarter.parquet --out-dir artifacts/prompts_hist_test_banks --include-types banks --date-start 2019-01-01`
+     - ×ª»»£º`python -m src.cli.prompts_to_sft --in artifacts/prompts_hist_test_banks/banks.jsonl --out artifacts/sft/test_banks.jsonl`
+     - ÆÀ²â£º`python -m src.cli.run_eval --test_path artifacts/sft/test_banks.jsonl --base_model Qwen/Qwen2.5-7B-Instruct --lora_path outputs/sft_banks --out_dir artifacts/eval_sft_banks`
 
-è¯´æ˜
-- `--include-types` æ¥å—ä»¥é€—å·åˆ†éš”çš„æ–‡ä»¶å stemï¼ˆå¦‚ `banks,mutual_funds`ï¼‰ï¼›å•ç±»å‹æ—¶ä»…å¡«ä¸€ä¸ªã€‚
-- è½¬æ¢é˜¶æ®µå¦‚æœ `--in` æŒ‡å‘ç›®å½•ï¼Œä¼šåˆå¹¶ç›®å½•å†…å…¨éƒ¨ jsonlï¼›å› æ­¤åš perâ€‘type è®­ç»ƒæ—¶ï¼ŒåŠ¡å¿…æŠŠ `--in` æŒ‡å‘å•ä¸ªç±»å‹çš„ jsonl æ–‡ä»¶è·¯å¾„ã€‚
+ËµÃ÷
+- `--include-types` ½ÓÊÜÒÔ¶ººÅ·Ö¸ôµÄÎÄ¼şÃû stem£¨Èç `banks,mutual_funds`£©£»µ¥ÀàĞÍÊ±½öÌîÒ»¸ö¡£
+- ×ª»»½×¶ÎÈç¹û `--in` Ö¸ÏòÄ¿Â¼£¬»áºÏ²¢Ä¿Â¼ÄÚÈ«²¿ jsonl£»Òò´Ë×ö per?type ÑµÁ·Ê±£¬Îñ±Ø°Ñ `--in` Ö¸Ïòµ¥¸öÀàĞÍµÄ jsonl ÎÄ¼şÂ·¾¶¡£
 
-è®­ç»ƒï¼ˆPython æ‰§è¡Œ ä¸ .sh å¯åŠ¨ï¼‰
-- Python æ‰§è¡Œï¼ˆSFTï¼‰ï¼š
+ÑµÁ·£¨Python Ö´ĞĞ Óë .sh Æô¶¯£©
+- Python Ö´ĞĞ£¨SFT£©£º
   - `python -m swift.cli.sft --model "Qwen/Qwen2.5-7B-Instruct" --train_type lora --dataset artifacts/sft/sft_train.jsonl --torch_dtype bfloat16 --num_train_epochs 3 --per_device_train_batch_size 1 --gradient_accumulation_steps 16 --learning_rate 1e-4 --lora_rank 8 --lora_alpha 32 --target_modules all-linear --logging_steps 20 --save_steps 500 --save_total_limit 2 --max_length 2048 --output_dir outputs/sft_qwen2.5_7b --system "You are a quantitative portfolio manager. Respond with valid JSON only."`
-- Python æ‰§è¡Œï¼ˆGRPOï¼‰ï¼š
-- `python -m swift.cli.rlhf --rlhf_type grpo --model "Qwen/Qwen2.5-7B-Instruct" --external_plugins src/plugins/grpo/holdings_plugin.py --reward_funcs contract_holdings mse_holdings --reward_weights 0.3 0.7 --train_type lora --lora_rank 8 --lora_alpha 32 --target_modules all-linear --torch_dtype bfloat16 --dataset artifacts/grpo/grpo.jsonl --load_from_cache_file true --max_completion_length 512 --num_train_epochs 1 --per_device_train_batch_size 1 --learning_rate 1e-6 --gradient_accumulation_steps 8 --logging_steps 5 --save_steps 100 --save_total_limit 2 --max_length 2048 --output_dir outputs/grpo_qwen2.5_7b --warmup_ratio 0.05 --dataset_num_proc 2 --num_generations 4 --temperature 0.9 --beta 0.04 --log_completions true`ï¼ˆè‹¥ç›´æ¥è°ƒç”¨ Python CLIï¼Œä»éœ€æ‰‹åŠ¨ä¼ å…¥å¥–åŠ±ç»„åˆï¼›è„šæœ¬ç‰ˆæœ¬å·²å†…ç½®ï¼‰
-- Linux/macOSï¼ˆ.sh å¯åŠ¨ï¼Œbanksæ•°æ®ä¸ºä¾‹ï¼‰ï¼š
-  - SFTï¼š`bash scripts/sft.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/sft/sft_train_banks.jsonl -o outputs/sft_qwen2.5_7b`
-  - GRPOï¼š`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo_banks.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512`ï¼ˆåŠ  `-v` å¯ç”¨ vLLM colocateï¼‰
-  - macOS è‹¥æ—  `bash` å¯æ”¹ç”¨ `zsh` æ‰§è¡Œä¸Šè¿°å‘½ä»¤ã€‚
-- Windowsï¼ˆPowerShellï¼‰ï¼šä¿æŒä½¿ç”¨ç°æœ‰ `.ps1` è„šæœ¬ `scripts/sft.ps1` ä¸ `scripts/grpo.ps1`ã€‚
+- Python Ö´ĞĞ£¨GRPO£©£º
+- `python -m swift.cli.rlhf --rlhf_type grpo --model "Qwen/Qwen2.5-7B-Instruct" --external_plugins src/plugins/grpo/holdings_plugin.py --reward_funcs contract_holdings mse_holdings --reward_weights 0.4 0.6 --train_type lora --lora_rank 8 --lora_alpha 32 --target_modules all-linear --torch_dtype bfloat16 --dataset artifacts/grpo/grpo.jsonl --load_from_cache_file true --max_completion_length 512 --num_train_epochs 1 --per_device_train_batch_size 1 --learning_rate 1e-6 --gradient_accumulation_steps 8 --logging_steps 5 --save_steps 100 --save_total_limit 2 --max_length 2048 --output_dir outputs/grpo_qwen2.5_7b --warmup_ratio 0.05 --dataset_num_proc 2 --num_generations 4 --temperature 0.9 --beta 0.04 --log_completions true`£¨ÈôÖ±½Óµ÷ÓÃ Python CLI£¬ÈÔĞèÊÖ¶¯´«Èë½±Àø×éºÏ£»½Å±¾°æ±¾ÒÑÄÚÖÃ£©
+- Linux/macOS£¨.sh Æô¶¯£¬banksÊı¾İÎªÀı£©£º
+  - SFT£º`bash scripts/sft.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/sft/sft_train_banks.jsonl -o outputs/sft_qwen2.5_7b`
+  - GRPO£º`bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo_banks.jsonl -o outputs/grpo_qwen2.5_7b -g 4 -l 512`£¨¼Ó `-v` ÆôÓÃ vLLM colocate£©
+  - macOS ÈôÎŞ `bash` ¿É¸ÄÓÃ `zsh` Ö´ĞĞÉÏÊöÃüÁî¡£
+- Windows£¨PowerShell£©£º±£³ÖÊ¹ÓÃÏÖÓĞ `.ps1` ½Å±¾ `scripts/sft.ps1` Óë `scripts/grpo.ps1`¡£
 
-é™„å½•ä¸å®Œæ•´è¯´æ˜
-- åŸå§‹å®Œæ•´è®°å½•ï¼ˆåŒ…å«æ›´è¯¦ç»†çš„åŠ¨æœºã€å‚æ•°ã€å¥–åŠ±å®šä¹‰ä¸å‘½ä»¤æ¸…å•ï¼‰ä¿å­˜åœ¨ä»“åº“æ–‡ä»¶ï¼š`_RESTORE_README.md`ã€‚æœ¬ README ä»…åšç»“æ„åŒ–æ•´ç†ä¸å¿«é€Ÿä¸Šæ‰‹ï¼Œæœªåˆ é™¤ä»»ä½•å†å²ä¿¡æ¯ã€‚
-- å¦‚éœ€æˆ‘å°† `_RESTORE_README.md` çš„å†…å®¹ç›´æ¥åˆå¹¶è¿›æœ¬ README ä½œä¸ºâ€œè¯¦ç»†ç‰ˆâ€ç« èŠ‚ï¼Œè¯·å‘ŠçŸ¥ï¼Œæˆ‘ä¼šæ— æŸåˆå¹¶å¹¶ä¿ç•™æ‰€æœ‰åŸæ®µè½ã€‚
+¸½Â¼ÓëÍêÕûËµÃ÷
+- Ô­Ê¼ÍêÕû¼ÇÂ¼£¨°üº¬¸üÏêÏ¸µÄ¶¯»ú¡¢²ÎÊı¡¢½±Àø¶¨ÒåÓëÃüÁîÇåµ¥£©±£´æÔÚ²Ö¿âÎÄ¼ş£º`_RESTORE_README.md`¡£±¾ README ½ö×ö½á¹¹»¯ÕûÀíÓë¿ìËÙÉÏÊÖ£¬Î´É¾³ıÈÎºÎÀúÊ·ĞÅÏ¢¡£
+- ÈçĞèÎÒ½« `_RESTORE_README.md` µÄÄÚÈİÖ±½ÓºÏ²¢½ø±¾ README ×÷Îª¡°ÏêÏ¸°æ¡±ÕÂ½Ú£¬Çë¸æÖª£¬ÎÒ»áÎŞËğºÏ²¢²¢±£ÁôËùÓĞÔ­¶ÎÂä¡£
 Manual Reward Scoring
 - Manually inspect reward scores for sampled completions aligned with the GRPO dataset:
 - `python -m src.cli.score_rewards \
@@ -187,31 +187,31 @@ Manual Reward Scoring
   `  --completions outputs/grpo_qwen2.5_7b/v1-20251018-073116/completions.jsonl \
   `  --external_plugins src/plugins/grpo/holdings_plugin.py \
   `  --reward_funcs contract_holdings mse_holdings \
-  `  --reward_weights 0.3 0.7 \
+  `  --reward_weights 0.4 0.6 \
   `  --completion_field completion.0 \
   `  --limit 5`
 - Notes: `--completion_field completion.0` selects the first sampled completion when the completions JSONL stores a list. Add `--strict_answer_only` to score only the <answer>...</answer> body. Adjust the completions path to your actual run directory.
 
-æ•°å€¼ä¼˜å…ˆçš„ GRPO è®­ç»ƒ
-- ç›®æ ‡ï¼šè®© HoldingsDeltaORMï¼ˆæ•°å€¼ç²¾åº¦ï¼‰ä¸»å¯¼ä¼˜åŒ–ï¼ŒContractHoldingsORM ä»…ä½œæ ¼å¼/è¾¹ç•Œå…œåº•ã€‚
-- PowerShellï¼ˆWindowsï¼‰ï¼š
+ÊıÖµÓÅÏÈµÄ GRPO ÑµÁ·
+- Ä¿±ê£ºÈÃ HoldingsDeltaORM£¨ÊıÖµ¾«¶È£©Ö÷µ¼ÓÅ»¯£¬ContractHoldingsORM ½ö×÷¸ñÊ½/±ß½ç¶µµ×¡£
+- PowerShell£¨Windows£©£º
   - `powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 8 -MaxCompletionLen 96 -Temperature 0.3 -StopWords "}"`
-- Bashï¼ˆLinux/macOSï¼‰ï¼š
+- Bash£¨Linux/macOS£©£º
   - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 8 -l 96 -T 0.3 -S "}"`
-  - æç¤ºï¼š
-  - è„šæœ¬å·²å†™æ­» `contract_holdings`+`mse_holdings`ï¼ˆ0.3/0.7ï¼‰ã€‚å¦‚éœ€è°ƒæ•´æ¯”ä¾‹ï¼Œè¯·ç›´æ¥ä¿®æ”¹ `scripts/grpo.sh` / `scripts/grpo.ps1` ä¸­çš„å¸¸é‡ï¼›å…¶ä¸­ `contract_holdings` ç°ä¼šæ£€æŸ¥ç”Ÿæˆæ–‡æœ¬ä¸­æ˜¯å¦å« `<think>â€¦</think>`ï¼Œç¼ºå¤±å°†è®° 0 åˆ†ã€‚
-  - çº¯ JSON è¾“å‡ºå»ºè®® `-S/--StopWords '}'`ï¼›è‹¥ä½¿ç”¨ XML ä¸¤åŒºå—ï¼Œæ”¹ä¸º `'</answer>'` å¹¶ä¿æŒæ•°æ®æ¨¡æ¿ä¸€è‡´ã€‚
-  - æ¸©åº¦å»ºè®® 0.3â€“0.6ï¼Œé¿å…å†—é•¿è¾“å‡ºï¼›`MaxCompletionLen` è®¾å®šä¸ºèƒ½å®Œæ•´å®¹çº³ JSON çš„æœ€å°è¶³å¤Ÿé•¿åº¦ä»¥å‡å°‘æˆªæ–­ã€‚
+  - ÌáÊ¾£º
+  - ½Å±¾ÒÑĞ´ËÀ `contract_holdings`+`mse_holdings`£¨0.4/0.6£©¡£ÈçĞèµ÷Õû±ÈÀı£¬ÇëÖ±½ÓĞŞ¸Ä `scripts/grpo.sh` / `scripts/grpo.ps1` ÖĞµÄ³£Á¿£»ÆäÖĞ `contract_holdings` ÏÖ»á¼ì²éÉú³ÉÎÄ±¾ÖĞÊÇ·ñº¬ `<think>¡­</think>`£¬È±Ê§½«¼Ç 0 ·Ö¡£
+  - ´¿ JSON Êä³ö½¨Òé `-S/--StopWords '}'`£»ÈôÊ¹ÓÃ XML Á½Çø¿é£¬¸ÄÎª `'</answer>'` ²¢±£³ÖÊı¾İÄ£°åÒ»ÖÂ¡£
+  - ÎÂ¶È½¨Òé 0.3¨C0.6£¬±ÜÃâÈß³¤Êä³ö£»`MaxCompletionLen` Éè¶¨ÎªÄÜÍêÕûÈİÄÉ JSON µÄ×îĞ¡×ã¹»³¤¶ÈÒÔ¼õÉÙ½Ø¶Ï¡£
 
-åœ¨ SFT åŸºç¡€ä¸Šçƒ­å¯åŠ¨ / ä» GRPO æ–­ç‚¹ç»­è®­
-- Bashï¼ˆLinux/macOSï¼‰ï¼š
-  - åŸºäºå·²æœ‰ SFT LoRA ç»§ç»­ï¼ˆè¯·æ›¿æ¢ `<SFT_ADAPTER_DIR>` ä¸ºä½ çš„ SFT é€‚é…å™¨ç›®å½•ï¼Œä¾‹å¦‚ `outputs/sft_qwen2.5_7b/v2-20251021-083409/checkpoint-189`ï¼‰
+ÔÚ SFT »ù´¡ÉÏÈÈÆô¶¯ / ´Ó GRPO ¶ÏµãĞøÑµ
+- Bash£¨Linux/macOS£©£º
+  - »ùÓÚÒÑÓĞ SFT LoRA ¼ÌĞø£¨ÇëÌæ»» `<SFT_ADAPTER_DIR>` ÎªÄãµÄ SFT ÊÊÅäÆ÷Ä¿Â¼£¬ÀıÈç `outputs/sft_qwen2.5_7b/v2-20251021-083409/checkpoint-189`£©
     - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo_banks.jsonl -o outputs/grpo_qwen2.5_7b -g 8 -l 96 -T 0.3 -S "}" -a <SFT_ADAPTER_DIR>`
-  - ä»å·²æœ‰ GRPO æ£€æŸ¥ç‚¹ç»§ç»­ï¼ˆè¯·æ›¿æ¢ `<GRPO_CKPT_DIR>` ä¸ºä½ çš„æ–­ç‚¹è·¯å¾„ï¼Œä¾‹å¦‚ `outputs/grpo_qwen2.5_7b/checkpoint-1000`ï¼‰
+  - ´ÓÒÑÓĞ GRPO ¼ì²éµã¼ÌĞø£¨ÇëÌæ»» `<GRPO_CKPT_DIR>` ÎªÄãµÄ¶ÏµãÂ·¾¶£¬ÀıÈç `outputs/grpo_qwen2.5_7b/checkpoint-1000`£©
     - `bash scripts/grpo.sh -m "Qwen/Qwen2.5-7B-Instruct" -d artifacts/grpo/grpo.jsonl -o outputs/grpo_qwen2.5_7b -g 8 -l 96 -T 0.3 -S "}" -r <GRPO_CKPT_DIR>`
-  - è¯´æ˜ï¼šå¦‚æœªæ˜¾å¼ä¼ å…¥ `-r`ï¼Œè„šæœ¬ä¼šåœ¨è¾“å‡ºç›®å½•ä¸­è‡ªåŠ¨æ£€æµ‹æœ€æ–°çš„ `checkpoint-*` ä½œä¸ºæ–­ç‚¹ã€‚
-- PowerShellï¼ˆWindowsï¼‰ï¼š
-  - åŸºäº SFT LoRAï¼š
+  - ËµÃ÷£ºÈçÎ´ÏÔÊ½´«Èë `-r`£¬½Å±¾»áÔÚÊä³öÄ¿Â¼ÖĞ×Ô¶¯¼ì²â×îĞÂµÄ `checkpoint-*` ×÷Îª¶Ïµã¡£
+- PowerShell£¨Windows£©£º
+  - »ùÓÚ SFT LoRA£º
     - `powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 8 -MaxCompletionLen 96 -Temperature 0.3 -StopWords "}" -Adapters <SFT_ADAPTER_DIR>`
-  - æ–­ç‚¹ç»­è®­ï¼š
+  - ¶ÏµãĞøÑµ£º
     - `powershell .\scripts\grpo.ps1 -Model "Qwen/Qwen2.5-7B-Instruct" -Dataset "artifacts/grpo/grpo.jsonl" -OutputDir "outputs/grpo_qwen2.5_7b" -NumGenerations 8 -MaxCompletionLen 96 -Temperature 0.3 -StopWords "}" -ResumeFrom <GRPO_CKPT_DIR>`
