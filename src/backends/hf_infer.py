@@ -102,7 +102,14 @@ def infer_chat_batch(tokenizer, model, list_messages: List[List[Dict[str,str]]],
         eos_token_id=tokenizer.eos_token_id,
         pad_token_id=tokenizer.eos_token_id
     )
-    return tokenizer.batch_decode(out, skip_special_tokens=True)
+    prompt_lengths = inputs["attention_mask"].sum(dim=1).tolist()
+    decoded = []
+    for seq, prompt_len in zip(out, prompt_lengths):
+        prompt_len = int(prompt_len)
+        generated_tokens = seq[prompt_len:]
+        text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+        decoded.append(text)
+    return decoded
 
 
 def parse_holding_t(user_text: str) -> float | None:
