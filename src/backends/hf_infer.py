@@ -112,6 +112,10 @@ def infer_chat_batch(tokenizer, model, list_messages: List[List[Dict[str,str]]],
         prompt_len = int(prompt_len)
         generated_tokens = seq[prompt_len:]
         text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+        if force_think:
+            text = text.lstrip()
+            if not text.startswith("<think>"):
+                text = f"<think>{text}"
         decoded.append(text)
     return decoded
 
