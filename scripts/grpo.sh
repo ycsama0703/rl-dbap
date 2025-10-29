@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Usage: bash scripts/grpo.sh -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR> \
 #        [-a <SFT_ADAPTER_DIR>] [-g <NUM_GENERATIONS>] [-l <MAX_COMPLETION_LEN>] [-r <CKPT_DIR>] [-v] \
+#        [-b <PER_DEVICE_BATCH>] [-A <GRAD_ACCUM>] [-R <LORA_RANK>] [-L <LORA_ALPHA>] \
 #        [-S "</answer>"|"}"] [-T 0.9]
 #   -a: initialize from existing SFT LoRA adapters (e.g., outputs/sft_*)
 #   -r: resume GRPO from a checkpoint dir (e.g., outputs/grpo_*/checkpoint-1000)
@@ -22,11 +23,15 @@ ADAPTERS=""
 RESUME_FROM=""
 TEMPERATURE=0.9
 STOP_WORDS=""
+PER_DEVICE_TRAIN_BATCH_SIZE=2
+GRADIENT_ACCUM_STEPS=4
+LORA_RANK=16
+LORA_ALPHA=64
 # 固定使用格式/数值奖励组合
 REWARD_FUNCS=(contract_holdings mse_holdings)
 REWARD_WEIGHTS=(0.4 0.6)
 
-while getopts ":m:d:o:g:l:a:r:vS:T:" opt; do
+while getopts ":m:d:o:g:l:a:r:vS:T:b:A:R:L:" opt; do
   case ${opt} in
     m) MODEL="$OPTARG" ;;
     d) DATASET="$OPTARG" ;;
@@ -38,7 +43,11 @@ while getopts ":m:d:o:g:l:a:r:vS:T:" opt; do
     v) USE_VLLM=1 ;;
     S) STOP_WORDS="$OPTARG" ;;
     T) TEMPERATURE="$OPTARG" ;;
-    *) echo "Usage: $0 -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR> [-a <SFT_ADAPTER_DIR>] [-g <NUM_GENERATIONS>] [-l <MAX_COMPLETION_LEN>] [-r <CKPT_DIR>] [-v] [-S <stop words>] [-T <temperature>]" ; exit 1 ;;
+    b) PER_DEVICE_TRAIN_BATCH_SIZE="$OPTARG" ;;
+    A) GRADIENT_ACCUM_STEPS="$OPTARG" ;;
+    R) LORA_RANK="$OPTARG" ;;
+    L) LORA_ALPHA="$OPTARG" ;;
+    *) echo "Usage: $0 -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR> [-a <SFT_ADAPTER_DIR>] [-g <NUM_GENERATIONS>] [-l <MAX_COMPLETION_LEN>] [-r <CKPT_DIR>] [-v] [-b <PER_DEVICE_BATCH>] [-A <GRAD_ACCUM>] [-R <LORA_RANK>] [-L <LORA_ALPHA>] [-S <stop words>] [-T <temperature>]" ; exit 1 ;;
   esac
 done
 
@@ -74,17 +83,17 @@ swift rlhf \
   --external_plugins src/plugins/grpo/holdings_plugin.py \
   --reward_funcs ${REWARD_FUNCS[@]} \
   --train_type lora \
-  --lora_rank 8 \
-  --lora_alpha 32 \
+  --lora_rank "${LORA_RANK}" \
+  --lora_alpha "${LORA_ALPHA}" \
   --target_modules all-linear \
   --torch_dtype bfloat16 \
   --dataset "${DATASET}" \
   --load_from_cache_file true \
   --max_completion_length "${MAX_COMPLETION_LEN}" \
   --num_train_epochs 1 \
-  --per_device_train_batch_size 1 \
+  --per_device_train_batch_size "${PER_DEVICE_TRAIN_BATCH_SIZE}" \
   --learning_rate 1e-6 \
-  --gradient_accumulation_steps 8 \
+  --gradient_accumulation_steps "${GRADIENT_ACCUM_STEPS}" \
   --logging_steps 5 \
   --save_steps 100 \
   --save_total_limit 2 \
