@@ -43,17 +43,17 @@ def main():
                     help="input prompts jsonl or directory with jsonl files")
     ap.add_argument("--out", dest="out", type=str, default="artifacts/sft/sft_train.jsonl")
     ap.add_argument("--system", type=str,
-                    default="You are a quantitative portfolio manager. Respond with valid JSON only.")
+                    default="You are a quantitative portfolio manager.")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--with-think", dest="with_think", action="store_true", default=True,
-                    help="Include a non-loss assistant <think> message before the JSON answer (default: enabled)")
+                    help="Embed a <think>...</think> block before the final answer (default: enabled)")
     ap.add_argument("--no-think", dest="with_think", action="store_false",
-                    help="Disable the additional <think> message")
+                    help="Do not include the <think> block")
     ap.add_argument("--contract-mode", choices=["absolute", "delta"], default="delta",
                     help="Select prediction target: absolute holding_tp1 or holding_delta.")
     ap.add_argument("--think-template", type=str,
-                    default="<think>Note key factor shifts and how they justify the final adjustment.</think>",
-                    help="Content to use for the optional <think> message when --with-think is enabled.")
+                    default="Summarise key fundamental shifts and justify the adjustment.",
+                    help="Inner text for the <think> block when --with-think is enabled.")
     ap.add_argument("--decimals", type=int, default=2,
                     help="Maximum decimal places for numeric outputs (default: 2).")
     args = ap.parse_args()
@@ -90,9 +90,17 @@ def main():
                         {"role": "system", "content": args.system},
                         {"role": "user", "content": prompt},
                     ]
+
+                    assistant_parts = []
                     if args.with_think:
-                        msgs.append({"role": "assistant", "content": args.think_template, "loss": False})
-                    msgs.append({"role": "assistant", "content": f"<answer>\n{resp}\n</answer>", "loss": True})
+                        think_text = args.think_template.strip()
+                        if not think_text.lower().startswith("<think>"):
+                            think_text = f"<think>{think_text}</think>"
+                        assistant_parts.append(think_text)
+                    assistant_parts.append(f"<answer>{resp}</answer>")
+
+                    assistant_msg = "\n".join(assistant_parts)
+                    msgs.append({"role": "assistant", "content": assistant_msg, "loss": True})
 
                     out = {"messages": msgs}
 

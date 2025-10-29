@@ -21,5 +21,4 @@ swift sft `
   --save_total_limit 2 `
   --max_length 2048 `
   --output_dir $OutputDir `
-  --system "You are a quantitative portfolio manager. Respond with valid JSON only."
-
+  --system "You are a quantitative portfolio manager."

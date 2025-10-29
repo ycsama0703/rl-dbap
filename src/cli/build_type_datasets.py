@@ -24,7 +24,7 @@ def _convert_prompts_to_sft(
     with_think: bool = True,
     contract_mode: str = "delta",
     decimals: int = 2,
-    think_template: str = "<think>Note key factor shifts and how they justify the final adjustment.</think>",
+    think_template: str = "Summarise key fundamental shifts and justify the adjustment.",
     limit: Optional[int] = None,
 ) -> int:
     from src.cli.prompts_to_sft import _resolve_absolute, _resolve_delta, _format_float
@@ -51,9 +51,14 @@ def _convert_prompts_to_sft(
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ]
+            assistant_parts = []
             if with_think:
-                msgs.append({"role": "assistant", "content": think_template, "loss": False})
-            msgs.append({"role": "assistant", "content": f"<answer>\n{resp}\n</answer>", "loss": True})
+                think_text = think_template.strip()
+                if not think_text.lower().startswith("<think>"):
+                    think_text = f"<think>{think_text}</think>"
+                assistant_parts.append(think_text)
+            assistant_parts.append(f"<answer>{resp}</answer>")
+            msgs.append({"role": "assistant", "content": "\n".join(assistant_parts), "loss": True})
             out = {"messages": msgs}
             fout.write(json.dumps(out, ensure_ascii=False) + "\n")
             n += 1
@@ -225,7 +230,7 @@ def main():
     _convert_prompts_to_sft(
         ph_sft,
         sft_out,
-        system="You are a quantitative portfolio manager. Respond with valid JSON only.",
+        system="You are a quantitative portfolio manager.",
         with_think=args.sft_with_think,
         contract_mode=args.sft_contract_mode,
         decimals=args.sft_decimals,
@@ -236,14 +241,14 @@ def main():
     _convert_prompts_to_sft(
         ph_test,
         sft_test_out,
-        system="You are a quantitative portfolio manager. Respond with valid JSON only.",
+        system="You are a quantitative portfolio manager.",
         with_think=False,
         contract_mode="absolute",
         decimals=args.sft_decimals,
     )
 
     print(f"[type-pipeline] convert GRPO -> dataset ({grpo_out})")
-    _convert_prompts_to_grpo(ph_grpo, grpo_out, system="You are a quantitative portfolio manager. Respond with valid JSON only.", no_think_example=args.grpo_no_think_example)
+    _convert_prompts_to_grpo(ph_grpo, grpo_out, system="You are a quantitative portfolio manager.", no_think_example=args.grpo_no_think_example)
 
     # 3) Report stats
     for fp, name in [(ph_sft, "prompts_sft"), (ph_grpo, "prompts_grpo"), (ph_test, "prompts_test")]:
