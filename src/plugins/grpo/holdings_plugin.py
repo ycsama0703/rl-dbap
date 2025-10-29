@@ -10,6 +10,7 @@ import numpy as np
 
 ANSWER_RE = re.compile(r"<answer>\s*(.*?)\s*</answer>", re.DOTALL | re.IGNORECASE)
 THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+THINK_CONTENT_RE = re.compile(r"<think>\s*(.*?)\s*</think>", re.DOTALL | re.IGNORECASE)
 
 
 def _extract_answer_body(text: str) -> str | None:
@@ -76,9 +77,23 @@ class ContractHoldingsORM(ORM):
             holding_t = [holding_t] * len(completions)
         for comp, ht in zip(completions, holding_t):
             try:
-                if not THINK_RE.search(comp or ""):
+                text = comp or ""
+                lower_text = text.lower()
+                if "<answer>" not in lower_text or ("</answer>" in lower_text and "<answer>" not in lower_text):
                     rewards.append(-1.0)
                     continue
+                think_match = THINK_CONTENT_RE.search(text)
+                if not think_match or not think_match.group(1).strip():
+                    rewards.append(-1.0)
+                    continue
+                answer_pos = lower_text.find("<answer>")
+                if answer_pos > -1:
+                    prefix = text[:answer_pos]
+                    cleaned_prefix = THINK_CONTENT_RE.sub("", prefix).strip()
+                    if "assistant" in cleaned_prefix.lower() or "</answer>" in cleaned_prefix.lower():
+                        rewards.append(-1.0)
+                        continue
+
                 # Accept values inside <answer> or anywhere in completion as fallback
                 body = _extract_answer_body(comp) or comp or ""
 
