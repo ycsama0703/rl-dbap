@@ -83,10 +83,18 @@ def parse_completion(raw: str, holding_t: Optional[float]) -> Dict[str, Any]:
 
 
 def generate_outputs(model_id: str, lora_path: Optional[str], chats: List[List[Dict[str, str]]],
-                     max_new_tokens: int, temperature: float, torch_dtype: str) -> List[str]:
+                     max_new_tokens: int, temperature: float, torch_dtype: str,
+                     force_think: bool) -> List[str]:
     tokenizer, model = load_model_and_tokenizer(model_id, lora_path, torch_dtype)
     model.eval()
-    return infer_chat_batch(tokenizer, model, chats, max_new_tokens=max_new_tokens, temperature=temperature)
+    return infer_chat_batch(
+        tokenizer,
+        model,
+        chats,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        force_think=force_think,
+    )
 
 
 def main() -> None:
@@ -99,6 +107,11 @@ def main() -> None:
     ap.add_argument("--max-new-tokens", type=int, default=96)
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--torch-dtype", type=str, default="bfloat16")
+    ap.add_argument("--force-think", dest="force_think", action="store_true",
+                    help="Force generations to begin with <think> (default).")
+    ap.add_argument("--no-force-think", dest="force_think", action="store_false",
+                    help="Disable forced <think> prefix.")
+    ap.set_defaults(force_think=True)
     args = ap.parse_args()
 
     chat_inputs, y_true, quarters, ids, holding_ts = build_eval_inputs(args.test_path)
@@ -107,12 +120,22 @@ def main() -> None:
 
     # Generate outputs
     base_completions = generate_outputs(
-        args.base_model, None, [chat_inputs[i] for i in subset_idxs],
-        max_new_tokens=args.max_new_tokens, temperature=args.temperature, torch_dtype=args.torch_dtype
+        args.base_model,
+        None,
+        [chat_inputs[i] for i in subset_idxs],
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        torch_dtype=args.torch_dtype,
+        force_think=args.force_think,
     )
     lora_completions = generate_outputs(
-        args.base_model, args.lora_path, [chat_inputs[i] for i in subset_idxs],
-        max_new_tokens=args.max_new_tokens, temperature=args.temperature, torch_dtype=args.torch_dtype
+        args.base_model,
+        args.lora_path,
+        [chat_inputs[i] for i in subset_idxs],
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        torch_dtype=args.torch_dtype,
+        force_think=args.force_think,
     )
 
     rows = []
@@ -150,4 +173,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

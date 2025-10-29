@@ -129,6 +129,19 @@ def main():
         default=50,
         help="Frequency (in processed samples) to log running MAE/RMSE during inference (requires --labels).",
     )
+    parser.add_argument(
+        "--force-think",
+        dest="force_think",
+        action="store_true",
+        help="Force generations to begin with <think> (default).",
+    )
+    parser.add_argument(
+        "--no-force-think",
+        dest="force_think",
+        action="store_false",
+        help="Disable forced <think> prefix.",
+    )
+    parser.set_defaults(force_think=True)
     args = parser.parse_args()
 
     prompts_path = Path(args.jsonl)
@@ -176,6 +189,7 @@ def main():
             messages,
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
+            force_think=args.force_think,
         )
 
         for rec, text in zip(batch, generations):

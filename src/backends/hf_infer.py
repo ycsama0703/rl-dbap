@@ -89,10 +89,14 @@ def load_model_and_tokenizer(base_model: str, lora_path: str|None, torch_dtype="
 
 @torch.no_grad()
 def infer_chat_batch(tokenizer, model, list_messages: List[List[Dict[str,str]]],
-                     max_new_tokens=48, temperature=0.0) -> List[str]:
-    prompts=[]
+                     max_new_tokens=48, temperature=0.0, force_think: bool = False) -> List[str]:
+    prompts = []
     for msgs in list_messages:
-        prompts.append(tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True))
+        prompt = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True).rstrip()
+        if force_think:
+            if not prompt.endswith("<think>"):
+                prompt = f"{prompt}\n<think>"
+        prompts.append(prompt)
     inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True, max_length=2048).to(model.device)
     out = model.generate(
         **inputs,

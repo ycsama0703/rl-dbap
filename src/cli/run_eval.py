@@ -12,7 +12,8 @@ except Exception:  # pragma: no cover - tqdm optional
 
 
 def run_one(model_id: str, lora_path: str|None, test_path: str, out_dir: str,
-            batch_size=8, max_new_tokens=48, temperature=0.0, torch_dtype="bfloat16"):
+            batch_size=8, max_new_tokens=48, temperature=0.0, torch_dtype="bfloat16",
+            force_think: bool = True):
 
     chat_inputs, y_true, quarters, ids, holding_ts = build_eval_inputs(test_path)
     tok, mdl = load_model_and_tokenizer(model_id, lora_path, torch_dtype)
@@ -21,8 +22,14 @@ def run_one(model_id: str, lora_path: str|None, test_path: str, out_dir: str,
     if tqdm:
         iterator = tqdm(iterator, desc=f"infer {Path(out_dir).name}", total=(len(chat_inputs)+batch_size-1)//batch_size)
     for i in iterator:
-        outs = infer_chat_batch(tok, mdl, chat_inputs[i:i+batch_size],
-                                max_new_tokens=max_new_tokens, temperature=temperature)
+        outs = infer_chat_batch(
+            tok,
+            mdl,
+            chat_inputs[i : i + batch_size],
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            force_think=force_think,
+        )
         for raw, ht in zip(outs, holding_ts[i:i+batch_size]):
             preds.append(extract_pred(raw, ht))
 
@@ -86,10 +93,24 @@ if __name__=="__main__":
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--torch_dtype", type=str, default="bfloat16")
     ap.add_argument("--post_csv_for_compare", type=str, default="")
+    ap.add_argument("--force-think", dest="force_think", action="store_true",
+                    help="Force generations to begin with <think> (default).")
+    ap.add_argument("--no-force-think", dest="force_think", action="store_false",
+                    help="Disable forced <think> prefix.")
+    ap.set_defaults(force_think=True)
     args = ap.parse_args()
 
-    df = run_one(args.base_model, args.lora_path, args.test_path, args.out_dir,
-                 args.batch_size, args.max_new_tokens, args.temperature, args.torch_dtype)
+    df = run_one(
+        args.base_model,
+        args.lora_path,
+        args.test_path,
+        args.out_dir,
+        args.batch_size,
+        args.max_new_tokens,
+        args.temperature,
+        args.torch_dtype,
+        args.force_think,
+    )
 
     if args.post_csv_for_compare:
         compare(str(Path(args.out_dir)/"pred_detail.csv"), args.post_csv_for_compare, args.out_dir)

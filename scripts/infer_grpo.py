@@ -93,6 +93,19 @@ def main():
         choices=["bfloat16", "float16"],
         help="Torch dtype when loading the base model.",
     )
+    parser.add_argument(
+        "--force-think",
+        dest="force_think",
+        action="store_true",
+        help="Force generations to begin with <think> (default).",
+    )
+    parser.add_argument(
+        "--no-force-think",
+        dest="force_think",
+        action="store_false",
+        help="Disable forced <think> prefix.",
+    )
+    parser.set_defaults(force_think=True)
     args = parser.parse_args()
 
     system = args.system.strip()
@@ -132,6 +145,7 @@ def main():
         [messages],
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
+        force_think=args.force_think,
     )
 
     output = generations[0]
