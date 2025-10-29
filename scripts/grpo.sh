@@ -16,7 +16,7 @@ set -euo pipefail
 MODEL="Qwen/Qwen2.5-7B-Instruct"
 DATASET="artifacts/grpo/grpo.jsonl"
 OUTPUT_DIR="outputs/grpo_qwen2.5_7b"
-NUM_GENERATIONS=6
+NUM_GENERATIONS=8
 MAX_COMPLETION_LEN=512
 USE_VLLM=0
 ADAPTERS=""

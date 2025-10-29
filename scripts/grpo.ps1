@@ -2,7 +2,7 @@ param(
   [string]$Model = "Qwen/Qwen2.5-7B-Instruct",
   [string]$Dataset = "artifacts/grpo/grpo.jsonl",
   [string]$OutputDir = "outputs/grpo_qwen2.5_7b",
-  [int]$NumGenerations = 6,
+  [int]$NumGenerations = 8,
   [int]$MaxCompletionLen = 512,
   [switch]$UseVllm,
   [string]$Adapters = "",
