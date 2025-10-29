@@ -2,7 +2,7 @@ param(
   [string]$Model = "Qwen/Qwen2.5-7B-Instruct",
   [string]$Dataset = "artifacts/grpo/grpo.jsonl",
   [string]$OutputDir = "outputs/grpo_qwen2.5_7b",
-  [int]$NumGenerations = 4,
+  [int]$NumGenerations = 6,
   [int]$MaxCompletionLen = 512,
   [switch]$UseVllm,
   [string]$Adapters = "",
@@ -31,15 +31,15 @@ swift rlhf `
   --external_plugins src/plugins/grpo/holdings_plugin.py `
   --reward_funcs $RewardFuncs `
   --train_type lora `
-  --lora_rank 8 `
-  --lora_alpha 32 `
+  --lora_rank 32 `
+  --lora_alpha 128 `
   --target_modules all-linear `
   --torch_dtype bfloat16 `
   --dataset $Dataset `
   --load_from_cache_file true `
   --max_completion_length $MaxCompletionLen `
   --num_train_epochs 1 `
-  --per_device_train_batch_size 1 `
+  --per_device_train_batch_size 4 `
   --learning_rate 1e-6 `
   --gradient_accumulation_steps 8 `
   --logging_steps 5 `
