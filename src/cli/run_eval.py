@@ -40,23 +40,48 @@ def run_one(model_id: str, lora_path: str|None, test_path: str, out_dir: str,
     os.makedirs(out_dir, exist_ok=True)
     df.to_csv(Path(out_dir)/"pred_detail.csv", index=True)
 
+    coverage = 100.0 * df["valid"].mean()
+    metrics_path = Path(out_dir) / "metrics.csv"
+
+    if valid.empty:
+        print("[run_eval] No valid predictions; skipping metric computation and plots.")
+        pd.DataFrame([{
+            "coverage%": coverage,
+            "MAE": np.nan, "RMSE": np.nan, "R2": np.nan, "sMAPE%": np.nan,
+            "IC": np.nan, "RankIC": np.nan,
+            "Recall@50": np.nan, "Precision@50": np.nan, "NDCG@50": np.nan
+        }]).to_csv(metrics_path, index=False)
+        return df
+
     mae, rmse, r2, sm, ic, ric = basic_regression(valid)
     rec, pre, ndcg = topk(valid, "quarter", k=50)
 
     pd.DataFrame([{
-        "coverage%": 100.0*df["valid"].mean(),
+        "coverage%": coverage,
         "MAE": mae, "RMSE": rmse, "R2": r2, "sMAPE%": sm,
         "IC": ic, "RankIC": ric,
         "Recall@50": rec, "Precision@50": pre, "NDCG@50": ndcg
-    }]).to_csv(Path(out_dir)/"metrics.csv", index=False)
+    }]).to_csv(metrics_path, index=False)
 
     # plots
-    (valid["y_pred"]-valid["y_true"]).hist(bins=50); plt.title("Residuals"); plt.tight_layout()
-    plt.savefig(Path(out_dir)/"residual_hist.png", dpi=150); plt.close()
+    residuals = valid["y_pred"] - valid["y_true"]
+    if not residuals.empty:
+        residuals.hist(bins=50)
+        plt.title("Residuals")
+        plt.tight_layout()
+        plt.savefig(Path(out_dir)/"residual_hist.png", dpi=150)
+        plt.close()
 
-    valid.groupby("quarter").apply(lambda g: g[["y_true","y_pred"]].corr(method="spearman").iloc[0,1]) \
-         .plot(kind="bar", title="Quarterly IC"); plt.tight_layout()
-    plt.savefig(Path(out_dir)/"ic_by_quarter.png", dpi=150); plt.close()
+    quarter_ic = (
+        valid.groupby("quarter", group_keys=False)
+        .apply(lambda g: g[["y_true", "y_pred"]].corr(method="spearman").iloc[0, 1])
+        .dropna()
+    )
+    if not quarter_ic.empty:
+        quarter_ic.plot(kind="bar", title="Quarterly IC")
+        plt.tight_layout()
+        plt.savefig(Path(out_dir)/"ic_by_quarter.png", dpi=150)
+        plt.close()
 
     return df
 
