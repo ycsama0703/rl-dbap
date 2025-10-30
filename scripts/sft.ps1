@@ -1,5 +1,5 @@
 param(
-  [string]$Model = "Qwen/Qwen3-8B-Instruct",
+  [string]$Model = "Qwen/Qwen2.5-7B-Instruct",
   [string]$Dataset = "artifacts/sft/sft_train.jsonl",
   [string]$OutputDir = "outputs/sft_qwen2.5_7b"
 )

@@ -100,7 +100,7 @@ def load_labels(labels_path: Path) -> Dict[int, float]:
 def main():
     parser = argparse.ArgumentParser(description="Run batch inference and export think/answer parsing results.")
     parser.add_argument("--jsonl", type=str, required=True, help="Prompt JSONL from export_infer_prompts.py.")
-    parser.add_argument("--base_model", type=str, default="Qwen/Qwen3-8B-Instruct", help="Base model ID or local path.")
+    parser.add_argument("--base_model", type=str, default="Qwen/Qwen2.5-7B-Instruct", help="Base model ID or local path.")
     parser.add_argument("--checkpoint", type=str, default="None", help="LoRA checkpoint directory (use None for base).")
     parser.add_argument("--labels", type=str, default="", help="Original eval JSONL to fetch ground-truth holding_tp1.")
     parser.add_argument("--out_jsonl", type=str, required=True, help="Destination JSONL to store outputs.")

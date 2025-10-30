@@ -45,7 +45,7 @@ def main():
     parser.add_argument(
         "--base_model",
         type=str,
-        default="Qwen/Qwen3-8B-Instruct",
+        default="Qwen/Qwen2.5-7B-Instruct",
         help="Base model to load (HF repo or local path).",
     )
     parser.add_argument(

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Usage: bash scripts/sft.sh -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR>
 
-MODEL="Qwen/Qwen3-8B-Instruct"
+MODEL="Qwen/Qwen2.5-7B-Instruct"
 DATASET="artifacts/sft/sft_train.jsonl"
 OUTPUT_DIR="outputs/sft_qwen2.5_7b"
 EXTRA_ARGS=()
