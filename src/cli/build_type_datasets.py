@@ -5,6 +5,7 @@ from typing import Optional
 import pandas as pd
 
 from src.cli.build_history_prompts import build_for_file
+from src.cli.prompts_to_sft import _build_auto_think
 
 try:
     from src.cli.map_ticker_names import load_mapping  # type: ignore
@@ -24,7 +25,7 @@ def _convert_prompts_to_sft(
     with_think: bool = True,
     contract_mode: str = "delta",
     decimals: int = 2,
-    think_template: str = "Summarise key fundamental shifts and justify the adjustment.",
+    think_template: str = "",
     limit: Optional[int] = None,
 ) -> int:
     from src.cli.prompts_to_sft import _resolve_absolute, _resolve_delta, _format_float
@@ -54,9 +55,13 @@ def _convert_prompts_to_sft(
             assistant_parts = []
             if with_think:
                 think_text = think_template.strip()
-                if not think_text.lower().startswith("<think>"):
-                    think_text = f"<think>{think_text}</think>"
-                assistant_parts.append(think_text)
+                if not think_text:
+                    think_text = _build_auto_think(prompt, decimals)
+                if think_text:
+                    think_lower = think_text.lower()
+                    if not think_lower.startswith("<think>"):
+                        think_text = f"<think>{think_text}</think>"
+                    assistant_parts.append(think_text)
             assistant_parts.append(f"<answer>{resp}</answer>")
             msgs.append({"role": "assistant", "content": "\n".join(assistant_parts), "loss": True})
             out = {"messages": msgs}
@@ -141,8 +146,8 @@ def main():
     ap.add_argument("--sft-decimals", type=int, default=2,
                     help="Round SFT labels to this many decimals (default: 2)")
     ap.add_argument("--sft-think-template", type=str,
-                    default="<think>Note key factor shifts and how they justify the final adjustment.</think>",
-                    help="Template injected when --sft-with-think is active")
+                    default="",
+                    help="Template injected when --sft-with-think is active (leave blank to auto-generate reasoning)")
     ap.add_argument("--grpo-no-think-example", action="store_true")
     ap.set_defaults(sft_with_think=True)
     args = ap.parse_args()

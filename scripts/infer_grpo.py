@@ -97,15 +97,15 @@ def main():
         "--force-think",
         dest="force_think",
         action="store_true",
-        help="Force generations to begin with <think> (default).",
+        help="Force generations to begin with <think>.",
     )
     parser.add_argument(
         "--no-force-think",
         dest="force_think",
         action="store_false",
-        help="Disable forced <think> prefix.",
+        help="Disable forced <think> prefix (default).",
     )
-    parser.set_defaults(force_think=True)
+    parser.set_defaults(force_think=False)
     args = parser.parse_args()
 
     system = args.system.strip()

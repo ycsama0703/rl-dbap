@@ -1,9 +1,9 @@
 # src/cli/prompts_to_sft.py
 
 from __future__ import annotations
-import argparse, json
+import argparse, json, re
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Dict
 
 
 def _resolve_absolute(rec: dict) -> float | None:
@@ -37,6 +37,63 @@ def _format_float(value: float, decimals: int) -> float:
     return float(f"{value:.{decimals}f}")
 
 
+def _parse_block(prompt: str, tag: str) -> Dict[str, float]:
+    """Parse a {t data} block into a dict of numeric features."""
+    pattern = re.compile(
+        rf"{re.escape(tag)}\s*(?:\r?\n)+(?P<body>.*?)(?=(\r?\n\s*\{{)|\Z)",
+        re.IGNORECASE | re.S,
+    )
+    m = pattern.search(prompt)
+    if not m:
+        return {}
+    body = m.group("body")
+    values: Dict[str, float] = {}
+    for token in re.split(r"[,\n]", body):
+        token = token.strip()
+        if not token:
+            continue
+        if "=" in token:
+            key, val = token.split("=", 1)
+        elif ":" in token:
+            key, val = token.split(":", 1)
+        else:
+            continue
+        key = key.strip()
+        val = val.strip()
+        try:
+            values[key] = float(val)
+        except ValueError:
+            continue
+    return values
+
+
+def _build_auto_think(prompt: str, decimals: int = 2) -> str:
+    """Create a lightweight reasoning snippet using t-1 -> t deltas."""
+    latest = _parse_block(prompt, "{t data}")
+    prev = _parse_block(prompt, "{t-1 data}")
+    parts = []
+    for key in ("me", "profit", "beta", "aum", "outAUM", "price"):
+        if key in latest and key in prev:
+            try:
+                delta = latest[key] - prev[key]
+                parts.append(f"{key}Δ={delta:+.{decimals}f}")
+            except Exception:
+                continue
+    holding_t = latest.get("holding")
+    if holding_t is not None:
+        try:
+            parts.append(f"holding_t={holding_t:.{decimals}f}")
+        except Exception:
+            pass
+    if not parts:
+        return "<think>Summarise key fundamental shifts and justify the adjustment.</think>"
+    summary = ", ".join(parts[:6])
+    return f"<think>{summary}. Explain how this guides the adjustment.</think>"
+
+
+__all__ = ["_build_auto_think"]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="inp", type=str, required=True,
@@ -52,7 +109,7 @@ def main():
     ap.add_argument("--contract-mode", choices=["absolute", "delta"], default="delta",
                     help="Select prediction target: absolute holding_tp1 or holding_delta.")
     ap.add_argument("--think-template", type=str,
-                    default="Summarise key fundamental shifts and justify the adjustment.",
+                    default="",
                     help="Inner text for the <think> block when --with-think is enabled.")
     ap.add_argument("--decimals", type=int, default=2,
                     help="Maximum decimal places for numeric outputs (default: 2).")
@@ -94,9 +151,13 @@ def main():
                     assistant_parts = []
                     if args.with_think:
                         think_text = args.think_template.strip()
-                        if not think_text.lower().startswith("<think>"):
-                            think_text = f"<think>{think_text}</think>"
-                        assistant_parts.append(think_text)
+                        if not think_text:
+                            think_text = _build_auto_think(prompt, args.decimals)
+                        if think_text:
+                            think_lower = think_text.lower()
+                            if not think_lower.startswith("<think>"):
+                                think_text = f"<think>{think_text}</think>"
+                            assistant_parts.append(think_text)
                     assistant_parts.append(f"<answer>{resp}</answer>")
 
                     assistant_msg = "\n".join(assistant_parts)

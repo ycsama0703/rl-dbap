@@ -84,15 +84,15 @@ def main() -> None:
         "--force-think",
         dest="force_think",
         action="store_true",
-        help="Force generations to begin with <think> (default).",
+        help="Force generations to begin with <think>.",
     )
     ap.add_argument(
         "--no-force-think",
         dest="force_think",
         action="store_false",
-        help="Disable forced <think> prefix.",
+        help="Disable forced <think> prefix (default).",
     )
-    ap.set_defaults(force_think=True)
+    ap.set_defaults(force_think=False)
     args = ap.parse_args()
 
     print("[inspect] loading data...")

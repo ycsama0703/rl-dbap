@@ -13,7 +13,7 @@ except Exception:  # pragma: no cover - tqdm optional
 
 def run_one(model_id: str, lora_path: str|None, test_path: str, out_dir: str,
             batch_size=8, max_new_tokens=48, temperature=0.0, torch_dtype="bfloat16",
-            force_think: bool = True):
+            force_think: bool = False):
 
     chat_inputs, y_true, quarters, ids, holding_ts = build_eval_inputs(test_path)
     tok, mdl = load_model_and_tokenizer(model_id, lora_path, torch_dtype)
@@ -94,10 +94,10 @@ if __name__=="__main__":
     ap.add_argument("--torch_dtype", type=str, default="bfloat16")
     ap.add_argument("--post_csv_for_compare", type=str, default="")
     ap.add_argument("--force-think", dest="force_think", action="store_true",
-                    help="Force generations to begin with <think> (default).")
+                    help="Force generations to begin with <think>.")
     ap.add_argument("--no-force-think", dest="force_think", action="store_false",
-                    help="Disable forced <think> prefix.")
-    ap.set_defaults(force_think=True)
+                    help="Disable forced <think> prefix (default).")
+    ap.set_defaults(force_think=False)
     args = ap.parse_args()
 
     df = run_one(

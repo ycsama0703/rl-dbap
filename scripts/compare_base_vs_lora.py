@@ -108,10 +108,10 @@ def main() -> None:
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--torch-dtype", type=str, default="bfloat16")
     ap.add_argument("--force-think", dest="force_think", action="store_true",
-                    help="Force generations to begin with <think> (default).")
+                    help="Force generations to begin with <think>.")
     ap.add_argument("--no-force-think", dest="force_think", action="store_false",
-                    help="Disable forced <think> prefix.")
-    ap.set_defaults(force_think=True)
+                    help="Disable forced <think> prefix (default).")
+    ap.set_defaults(force_think=False)
     args = ap.parse_args()
 
     chat_inputs, y_true, quarters, ids, holding_ts = build_eval_inputs(args.test_path)
