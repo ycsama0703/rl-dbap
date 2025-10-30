@@ -1,13 +1,16 @@
-﻿# RL-DBAP Pipeline (Qwen2.5-7B)
+RL-DBAP Workflow (Banks, Qwen2.5-7B)
+====================================
 
-Step-by-step commands to regenerate prompts, train SFT/GRPO, and run evaluation with `Qwen/Qwen2.5-7B-Instruct`. Run everything from the project root `/workspace/rl-dbap` in **bash**.
+All commands below assume a bash shell (WSL or Linux) running in `/workspace/rl-dbap`.
 
-## 0. Environment
+0. Environment
+--------------
 ```bash
 export PYTHONPATH=.
 ```
 
-## 1. Generate 2000 Prompts
+1. Build Prompt Windows
+-----------------------
 ```bash
 python -m src.cli.build_history_prompts \
   --in-dir data/processed/panel_quarter.parquet \
@@ -35,7 +38,8 @@ python -m src.cli.build_history_prompts \
   --exclude-zero-holding-t
 ```
 
-## 2. Convert to SFT / GRPO / Test Chat Data
+2. Convert Prompts to Chat Datasets
+-----------------------------------
 ```bash
 python -m src.cli.prompts_to_sft \
   --in artifacts/prompts_hist_sft/banks.jsonl \
@@ -52,7 +56,8 @@ python -m src.cli.prompts_to_sft \
   --no-think
 ```
 
-## 3. SFT Training (`Qwen/Qwen2.5-7B-Instruct`)
+3. SFT Training (Qwen/Qwen2.5-7B-Instruct)
+-----------------------------------------
 ```bash
 bash scripts/sft.sh \
   -m "Qwen/Qwen2.5-7B-Instruct" \
@@ -65,59 +70,89 @@ bash scripts/sft.sh \
   --lora_alpha 64 \
   --num_train_epochs 4
 ```
-Record the latest checkpoint (e.g. `outputs/sft_banks_qwen2p5/checkpoint-500`).
+The main checkpoint referenced later is `outputs/sft_banks_qwen2p5/checkpoint-500`.
 
-## 4. GRPO Training (format:numeric = 0.3 : 0.7)
+4. GRPO Training (Reward Mix 0.3 Format / 0.7 Value)
+----------------------------------------------------
 ```bash
 bash scripts/grpo.sh \
   -m "Qwen/Qwen2.5-7B-Instruct" \
   -d artifacts/grpo/grpo_banks.jsonl \
-  -o outputs/grpo_banks_qwen2p5 \
+  -o outputs/grpo_banks_v4 \
   -a outputs/sft_banks_qwen2p5/checkpoint-500 \
   -S "</answer>"
 ```
 
-## 5. Evaluation
+5. Strict Evaluation (No Fallback Parsing)
+-----------------------------------------
+Use `scripts/run_eval_strict.py` to avoid legacy parsing paths. Delete old artifacts before each run.
+
 ```bash
-# GRPO model
-python -m src.cli.run_eval \
+rm -rf artifacts/eval_grpo_banks_v4_strict
+python scripts/run_eval_strict.py \
   --test_path artifacts/test/test_banks.jsonl \
   --base_model Qwen/Qwen2.5-7B-Instruct \
-  --lora_path outputs/grpo_banks_qwen2p5/checkpoint-500 \
-  --out_dir artifacts/eval_grpo_banks_qwen2p5
+  --lora_path outputs/grpo_banks_v4/v0-20251030-062734/checkpoint-500 \
+  --out_dir artifacts/eval_grpo_banks_v4_strict
 
-# (Optional) SFT-only
-python -m src.cli.run_eval \
+rm -rf artifacts/eval_sft_banks_v4_strict
+python scripts/run_eval_strict.py \
   --test_path artifacts/test/test_banks.jsonl \
   --base_model Qwen/Qwen2.5-7B-Instruct \
   --lora_path outputs/sft_banks_qwen2p5/checkpoint-500 \
-  --out_dir artifacts/eval_sft_banks_qwen2p5
+  --out_dir artifacts/eval_sft_banks_v4_strict
 
-# (Optional) Base model
-python -m src.cli.run_eval \
+rm -rf artifacts/eval_base_banks_v4_strict
+python scripts/run_eval_strict.py \
   --test_path artifacts/test/test_banks.jsonl \
   --base_model Qwen/Qwen2.5-7B-Instruct \
   --lora_path None \
-  --out_dir artifacts/eval_base_banks_qwen2p5
+  --out_dir artifacts/eval_base_banks_v4_strict
 ```
+Each directory contains `pred_detail.csv` and `metrics.csv`.
 
-## 6. Sample Outputs (Optional)
+6. Capture Raw Outputs for Debugging
+------------------------------------
 ```bash
-python scripts/compare_base_vs_lora.py \
+python scripts/debug_eval_outputs.py \
   --test-path artifacts/test/test_banks.jsonl \
   --base-model Qwen/Qwen2.5-7B-Instruct \
-  --lora-path outputs/grpo_banks_qwen2p5/checkpoint-500 \
-  --limit 20 \
+  --lora-path outputs/grpo_banks_v4/v0-20251030-062734/checkpoint-500 \
   --max-new-tokens 128 \
-  --out-csv outputs/banks_base_vs_grpo_qwen2p5.csv
+  --force-think \
+  --out-csv outputs/debug_eval_outputs_grpo.csv
 
-python scripts/inspect_eval_outputs.py \
+python scripts/debug_eval_outputs.py \
   --test-path artifacts/test/test_banks.jsonl \
   --base-model Qwen/Qwen2.5-7B-Instruct \
-  --lora-path outputs/grpo_banks_qwen2p5/checkpoint-500 \
-  --limit 20 \
+  --lora-path outputs/sft_banks_qwen2p5/checkpoint-500 \
   --max-new-tokens 128 \
-  --out-jsonl outputs/banks_grpo_samples_qwen2p5.jsonl
+  --force-think \
+  --out-csv outputs/debug_eval_outputs_sft.csv
+
+python scripts/debug_eval_outputs.py \
+  --test-path artifacts/test/test_banks.jsonl \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --lora-path None \
+  --max-new-tokens 128 \
+  --force-think \
+  --out-csv outputs/debug_eval_outputs_base.csv
 ```
+Each CSV records the raw generation, parsed prediction, label, and absolute error.
 
-以上命令涵盖更新后的 prompt 模板、SFT/GRPO 训练与评测流程。需要重新开始时按顺序执行即可。
+7. Recompute Metrics from Debug CSVs
+------------------------------------
+```bash
+python scripts/compute_metrics_from_debug.py \
+  --debug-csv outputs/debug_eval_outputs_grpo.csv \
+  --out-csv outputs/metrics_from_debug_grpo.csv
+
+python scripts/compute_metrics_from_debug.py \
+  --debug-csv outputs/debug_eval_outputs_sft.csv \
+  --out-csv outputs/metrics_from_debug_sft.csv
+
+python scripts/compute_metrics_from_debug.py \
+  --debug-csv outputs/debug_eval_outputs_base.csv \
+  --out-csv outputs/metrics_from_debug_base.csv
+```
+The metric CSVs report coverage, MAE, RMSE, R2, sMAPE, IC, RankIC, Recall@50, Precision@50, and NDCG@50.
