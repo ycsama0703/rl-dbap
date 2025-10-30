@@ -13,7 +13,7 @@ set -euo pipefail
 #   -S: stop words (single string)
 #   -T: temperature (float)
 
-MODEL="Qwen/Qwen2.5-7B-Instruct"
+MODEL="Qwen/Qwen3-8B-Instruct"
 DATASET="artifacts/grpo/grpo.jsonl"
 OUTPUT_DIR="outputs/grpo_qwen2.5_7b"
 NUM_GENERATIONS=8

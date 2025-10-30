@@ -41,7 +41,7 @@ def main() -> None:
     ap.add_argument(
         "--base-model",
         type=str,
-        default="Qwen/Qwen2.5-7B-Instruct",
+        default="Qwen/Qwen3-8B-Instruct",
         help="HF model name or local path.",
     )
     ap.add_argument(

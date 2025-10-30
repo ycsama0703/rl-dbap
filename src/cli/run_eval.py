@@ -110,7 +110,7 @@ def compare(pre_csv: str, post_csv: str, out_dir: str):
 if __name__=="__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--test_path", type=str, default="artifacts/sft/test.jsonl")
-    ap.add_argument("--base_model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
+    ap.add_argument("--base_model", type=str, default="Qwen/Qwen3-8B-Instruct")
     ap.add_argument("--lora_path", type=str, default="None", help="None => Pre-SFT")
     ap.add_argument("--out_dir", type=str, required=True)
     ap.add_argument("--batch_size", type=int, default=8)

@@ -1,5 +1,5 @@
 param(
-  [string]$Model = "Qwen/Qwen2.5-7B-Instruct",
+  [string]$Model = "Qwen/Qwen3-8B-Instruct",
   [string]$Dataset = "artifacts/grpo/grpo.jsonl",
   [string]$OutputDir = "outputs/grpo_qwen2.5_7b",
   [int]$NumGenerations = 8,

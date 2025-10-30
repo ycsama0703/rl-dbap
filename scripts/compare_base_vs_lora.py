@@ -100,7 +100,7 @@ def generate_outputs(model_id: str, lora_path: Optional[str], chats: List[List[D
 def main() -> None:
     ap = argparse.ArgumentParser(description="Compare base vs LoRA model outputs on a subset of prompts.")
     ap.add_argument("--test-path", type=str, required=True)
-    ap.add_argument("--base-model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
+    ap.add_argument("--base-model", type=str, default="Qwen/Qwen3-8B-Instruct")
     ap.add_argument("--lora-path", type=str, required=True, help="LoRA checkpoint directory")
     ap.add_argument("--out-csv", type=str, default="outputs/base_vs_lora.csv")
     ap.add_argument("--limit", type=int, default=10)
