@@ -27,6 +27,7 @@ training stage is configured, and how evaluation metrics are computed.
 ### 1.3 Prompt materialisation
 - Each sampled window becomes a prompt through `build_history_prompt`, which writes the history blocks, the
   contract for `holding_delta`, and guardrails on bounds (`src/prompts/builder.py:43`).
+  - Labels obey `holding_delta = holding_tp1 - holding_t`, and the prompt enforces `holding_delta >= -holding_t`.
 - Auxiliary fields (`holding_t`, `label_tp1`, `label_delta`, identifiers) are stored alongside the prompt so they can
   be reused when constructing SFT or GRPO datasets and when computing rewards (`src/prompts/builder.py:118`).
 
@@ -55,7 +56,10 @@ By default the pipeline samples up to 1,000 windows per type, balances them acro
 - `prompts_to_sft.py` attaches the system instruction, the user prompt, and an assistant reply that optionally begins
   with an auto-generated `<think>...</think>` block summarising recent factor deltas (`src/cli/prompts_to_sft.py:146`).
 - Targets can be emitted either as `holding_delta` (default) or reconstructed absolute `holding_tp1`
-  (`src/cli/prompts_to_sft.py:123`).
+  (`src/cli/prompts_to_sft.py:123`):
+  - Delta mode emits `{ "holding_delta": round(label_delta, decimals) }`.
+  - Absolute mode emits `{ "holding_tp1": round(label_tp1, decimals) }`, where missing absolute labels are recovered
+    by `label_tp1 = holding_t + label_delta`.
 
 ### 3.2 Training recipe
 - `scripts/sft.sh` launches `swift sft` with LoRA rank 8, alpha 32, bfloat16, and effective batch size 16 via gradient
@@ -75,11 +79,16 @@ By default the pipeline samples up to 1,000 windows per type, balances them acro
 Custom ORMs live in `src/plugins/grpo/holdings_plugin.py`:
 
 - `contract_holdings` rewards completions that obey the `<think>` plus `<answer>{"holding_delta":...}</answer>` contract
-  and respect the lower bound `holding_delta >= -holding_t` (`src/plugins/grpo/holdings_plugin.py:63`).
+  and respect `holding_delta >= -holding_t` (`src/plugins/grpo/holdings_plugin.py:63`).
+  - Reward: `R_contract = 1.0` if the JSON is well-formed, finite, and within bounds; otherwise `R_contract = -1.0`.
 - `mse_holdings` computes a robustly scaled squared-error score on the predicted delta, clipping via the 95th percentile
   to map errors into `[-1, 1]` (`src/plugins/grpo/holdings_plugin.py:254`).
-- `external_holdings` (optional) mixes a Huber-style magnitude reward with a direction reward using adaptive EMA
-  scaling; it is registered but not enabled in the default launcher (`src/plugins/grpo/holdings_plugin.py:115`).
+  - With `e = holding_delta_pred - holding_delta_true`, `scale = percentile_95(|e|)` and `x = e / max(scale, 1e-6)`,
+    the reward is `R_mse = 2 * (1 - min(x^2, 4) / 4) - 1`.
+- `external_holdings` (optional) mixes a magnitude and direction objective (`src/plugins/grpo/holdings_plugin.py:115`):
+  - Magnitude: `R_mag = 2 * (1 - min(log1p(|e|)^2 / 4, 1)) - 1`, where `e = holding_delta_pred - holding_delta_true`.
+  - Direction: `R_dir = 2 * sigmoid(alpha * (((holding_delta_pred / c_dir) * sign(holding_delta_true)) - margin)) - 1`.
+  - Combined: `R_external = w_mag * R_mag + w_dir * R_dir`, with EMA-updated scales `c_mag` and `c_dir`.
 
 `score_rewards.py` can audit model completions against any registered reward by replaying datasets and printing score
 statistics (`src/cli/score_rewards.py:113`).
@@ -87,8 +96,8 @@ statistics (`src/cli/score_rewards.py:113`).
 ### 4.3 GRPO training recipe
 - `scripts/grpo.sh` launches `swift rlhf --rlhf_type grpo` with LoRA rank 32 (alpha 128), eight samples per prompt,
   temperature 0.9, and beta 0.02 (`scripts/grpo.sh:80`).
-- Format and accuracy rewards are combined with weights 0.3 (`contract_holdings`) and 0.7 (`mse_holdings`)
-  (`scripts/grpo.sh:31`).
+- Format and accuracy rewards are combined as `R_total = 0.3 * R_contract + 0.7 * R_mse`
+  (`scripts/grpo.sh:31`). (If `external_holdings` is enabled, it contributes via an additional weight.)
 - The launcher can resume from the latest checkpoint automatically and optionally warm start from the SFT adapters.
 
 ---
@@ -97,12 +106,22 @@ statistics (`src/cli/score_rewards.py:113`).
 
 ### 5.1 Generation and parsing
 - `run_eval.py` loads the base model plus optional LoRA adapters, generates answers, and re-parses either
-  `holding_tp1` directly or reconstructs it from `holding_delta + holding_t` if needed (`src/backends/hf_infer.py:42`).
+  `holding_tp1` directly or reconstructs it from `holding_delta + holding_t` if needed (`src/backends/hf_infer.py:42`):
+  - If the completion returns `holding_tp1`, the prediction is `y_pred = max(holding_tp1, 0)`.
+  - If only `holding_delta` is present, `y_pred = max(holding_t + holding_delta, 0)`.
 - Coverage is tracked by counting rows where parsing succeeds before computing metrics (`src/cli/run_eval.py:36`).
 
 ### 5.2 Metrics
 - `basic_regression` returns MAE, RMSE, R2, sMAPE, IC, and RankIC; `topk` adds Recall, Precision, and NDCG@50 by quarter
-  (`src/evaluation/metrics.py:6`).
+  (`src/evaluation/metrics.py:6`). The exact formulas are:
+  - `MAE = (1/N) * Σ |y_true - y_pred|`
+  - `RMSE = sqrt( (1/N) * Σ (y_true - y_pred)^2 )`
+  - `R2 = 1 - Σ (y_true - y_pred)^2 / (Σ (y_true - mean(y_true))^2 + 1e-12)`
+  - `sMAPE = 200 * (1/N) * Σ |y_true - y_pred| / (|y_true| + |y_pred| + 1e-12)`
+  - `IC = SpearmanCorr(y_true, y_pred)`
+  - `RankIC = SpearmanCorr(rank(y_true), rank(y_pred))`
+  - For each quarter `q`, `Recall@k_q = hits_q / min(k, |relevant_q|)`, `Precision@k_q = hits_q / k`, and
+    `NDCG@k_q = DCG@k_q / IDCG@k_q` with `DCG@k_q = Σ_{i=1..k} (rel_i / log2(i+1))` using binary relevance.
 - `compute_debug_metrics.py` re-runs the same metrics on debug CSVs and supports trimming out large residuals based on
   an absolute-error percentile (`src/cli/compute_debug_metrics.py:30`).
 - `run_eval_suite.py` evaluates base, SFT, and GRPO checkpoints on a shared test set and emits per-stage CSVs plus
