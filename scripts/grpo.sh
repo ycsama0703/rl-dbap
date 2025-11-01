@@ -31,6 +31,16 @@ LORA_ALPHA=128
 REWARD_FUNCS=(contract_holdings mse_holdings)
 REWARD_WEIGHTS=(0.3 0.7)
 
+# Optional logging targets (can also be supplied via environment variables, e.g. SWIFT_REPORT_TO=swanlab)
+REPORT_TO="${SWIFT_REPORT_TO:-}"
+SWANLAB_PROJECT="${SWIFT_SWANLAB_PROJECT:-}"
+SWANLAB_TOKEN="${SWIFT_SWANLAB_TOKEN:-}"
+SWANLAB_WORKSPACE="${SWIFT_SWANLAB_WORKSPACE:-}"
+SWANLAB_EXP_NAME="${SWIFT_SWANLAB_EXP_NAME:-}"
+SWANLAB_MODE="${SWIFT_SWANLAB_MODE:-}"
+
+declare -a EXTRA_ARGS=()
+
 while getopts ":m:d:o:g:l:a:r:vS:T:b:A:R:L:" opt; do
   case ${opt} in
     m) MODEL="$OPTARG" ;;
@@ -48,6 +58,53 @@ while getopts ":m:d:o:g:l:a:r:vS:T:b:A:R:L:" opt; do
     R) LORA_RANK="$OPTARG" ;;
     L) LORA_ALPHA="$OPTARG" ;;
     *) echo "Usage: $0 -m <MODEL> -d <DATASET_JSONL> -o <OUTPUT_DIR> [-a <SFT_ADAPTER_DIR>] [-g <NUM_GENERATIONS>] [-l <MAX_COMPLETION_LEN>] [-r <CKPT_DIR>] [-v] [-b <PER_DEVICE_BATCH>] [-A <GRAD_ACCUM>] [-R <LORA_RANK>] [-L <LORA_ALPHA>] [-S <stop words>] [-T <temperature>]" ; exit 1 ;;
+  esac
+done
+
+shift $((OPTIND - 1))
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --report-to-swanlab)
+      REPORT_TO="swanlab"
+      shift
+      ;;
+    --report_to|--report-to)
+      REPORT_TO="$2"
+      shift 2
+      ;;
+    --swanlab_project|--swanlab-project)
+      SWANLAB_PROJECT="$2"
+      shift 2
+      ;;
+    --swanlab_token|--swanlab-token)
+      SWANLAB_TOKEN="$2"
+      shift 2
+      ;;
+    --swanlab_workspace|--swanlab-workspace)
+      SWANLAB_WORKSPACE="$2"
+      shift 2
+      ;;
+    --swanlab_exp_name|--swanlab-exp-name)
+      SWANLAB_EXP_NAME="$2"
+      shift 2
+      ;;
+    --swanlab_mode|--swanlab-mode)
+      SWANLAB_MODE="$2"
+      shift 2
+      ;;
+    --)
+      shift
+      while [[ $# -gt 0 ]]; do
+        EXTRA_ARGS+=("$1")
+        shift
+      done
+      break
+      ;;
+    *)
+      EXTRA_ARGS+=("$1")
+      shift
+      ;;
   esac
 done
 
@@ -75,6 +132,25 @@ if [[ -z "$RESUME_FROM" ]]; then
   if [[ -n "$latest_ckpt" ]]; then
     RESUME_ARGS=(--resume_from_checkpoint "$latest_ckpt")
   fi
+fi
+
+if [[ -n "$REPORT_TO" && "$REPORT_TO" != "none" ]]; then
+  EXTRA_ARGS+=(--report_to "$REPORT_TO")
+fi
+if [[ -n "$SWANLAB_PROJECT" ]]; then
+  EXTRA_ARGS+=(--swanlab_project "$SWANLAB_PROJECT")
+fi
+if [[ -n "$SWANLAB_TOKEN" ]]; then
+  EXTRA_ARGS+=(--swanlab_token "$SWANLAB_TOKEN")
+fi
+if [[ -n "$SWANLAB_WORKSPACE" ]]; then
+  EXTRA_ARGS+=(--swanlab_workspace "$SWANLAB_WORKSPACE")
+fi
+if [[ -n "$SWANLAB_EXP_NAME" ]]; then
+  EXTRA_ARGS+=(--swanlab_exp_name "$SWANLAB_EXP_NAME")
+fi
+if [[ -n "$SWANLAB_MODE" ]]; then
+  EXTRA_ARGS+=(--swanlab_mode "$SWANLAB_MODE")
 fi
 
 swift rlhf \
@@ -107,6 +183,7 @@ swift rlhf \
   --log_completions true \
   --reward_weights ${REWARD_WEIGHTS[@]} \
   $( [[ -n "$STOP_WORDS" ]] && echo --stop_words "$STOP_WORDS" ) \
+  "${EXTRA_ARGS[@]}" \
   "${EXTRA_VLLM_ARGS[@]}" \
   "${ADAPTER_ARGS[@]}" \
   "${RESUME_ARGS[@]}"

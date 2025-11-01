@@ -7,6 +7,8 @@ All commands below assume a bash shell (WSL or Linux) running in `/workspace/rl-
 --------------
 ```bash
 export PYTHONPATH=.
+# Install core dependencies (includes ms-swift + SwanLab)
+pip install -r requirements.txt
 ```
 
 1. Build Prompt Windows
@@ -63,12 +65,14 @@ bash scripts/sft.sh \
   -m "Qwen/Qwen2.5-7B-Instruct" \
   -d artifacts/sft/sft_train_banks.jsonl \
   -o outputs/sft_banks_qwen2p5 \
-  -- \
   --per_device_train_batch_size 2 \
   --gradient_accumulation_steps 8 \
   --lora_rank 16 \
   --lora_alpha 64 \
-  --num_train_epochs 4
+  --num_train_epochs 4 \
+  --report-to-swanlab \
+  --swanlab-project rl-dbap \
+  --swanlab-exp-name banks-sft
 ```
 The main checkpoint referenced later is `outputs/sft_banks_qwen2p5/checkpoint-500`.
 
@@ -80,7 +84,10 @@ bash scripts/grpo.sh \
   -d artifacts/grpo/grpo_banks.jsonl \
   -o outputs/grpo_banks_v4 \
   -a outputs/sft_banks_qwen2p5/checkpoint-500 \
-  -S "</answer>"
+  -S "</answer>" \
+  --report-to-swanlab \
+  --swanlab-project rl-dbap \
+  --swanlab-exp-name banks-grpo
 ```
 
 5. Strict Evaluation (No Fallback Parsing)
@@ -155,4 +162,23 @@ python scripts/compute_metrics_from_debug.py \
   --debug-csv outputs/debug_eval_outputs_base.csv \
   --out-csv outputs/metrics_from_debug_base.csv
 ```
+
+## Real-time Monitoring with SwanLab (optional)
+
+1. Install and authenticate (once per machine):
+   ```bash
+   pip install swanlab
+   swanlab login
+   ```
+2. Enable logging through the helper scripts:
+   - Command-line flags: `--report-to-swanlab`, `--swanlab-project <name>`, `--swanlab-token <api-key>`, `--swanlab-workspace <team>`, `--swanlab-exp-name <run>`, `--swanlab-mode <cloud|local>`.
+   - Or environment variables (same semantics):
+     ```bash
+     export SWIFT_REPORT_TO=swanlab
+     export SWIFT_SWANLAB_PROJECT=rl-dbap
+     export SWIFT_SWANLAB_EXP_NAME=banks-sft
+     ```
+   - Any remaining Swift CLI arguments can still be appended as usual.
+
+Metrics continue to be written locally (`runs/*.tfevents`, `logging.jsonl`), so SwanLab can be used alongside TensorBoard if desired.
 The metric CSVs report coverage, MAE, RMSE, R2, sMAPE, IC, RankIC, Recall@50, Precision@50, and NDCG@50.
