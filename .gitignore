@@ -1,6 +1,6 @@
 # Data (ignored)
 data/
-artifacts/
+artifacts/*
 outputs/
 output/
 predictions/
@@ -8,6 +8,12 @@ predictions/
 # Keep tiny sample artifacts for docs/demo
 !artifacts/samples/
 !artifacts/samples/**
+!artifacts/grpo/
+!artifacts/grpo/**
+!artifacts/sft/
+!artifacts/sft/**
+!artifacts/test/
+!artifacts/test/**
 
 # Large file patterns
 *.parquet
