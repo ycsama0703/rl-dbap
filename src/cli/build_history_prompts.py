@@ -34,6 +34,20 @@ def _row_from_dfrow(r: pd.Series) -> PromptRow:
     )
 
 
+def _normalize_prompt_text(s: str) -> str:
+    """Fix any legacy encoding artifacts to match prior prompt style exactly.
+    - Replace broken '≥' and arrows in instruction examples.
+    """
+    try:
+        s = s.replace("holding_delta �?-holding_t", "holding_delta ≥ -holding_t")
+        s = s.replace("me�?(", "me↓ (")
+        s = s.replace("profit�?(", "profit↑ (")
+        s = s.replace(" �?moderate", " → moderate")
+    except Exception:
+        pass
+    return s
+
+
 REQUIRED_COLS = [
     "type", "mgrno", "permno", "date", "holding_t", "holding_t1",
     "me", "be", "profit", "Gat", "beta", "aum", "outaum", "prc"
@@ -125,6 +139,7 @@ def build_for_file(
             rows = [df.loc[idx] for idx in (w.idx_tm3, w.idx_tm2, w.idx_tm1, w.idx_t)]
             hist_rows = [_row_from_dfrow(r) for r in rows]
             prompt, extras = build_history_prompt(hist_rows, hide_date=True, target="delta", strict_contract=True)
+            prompt = _normalize_prompt_text(prompt)
             # Automatically map Ticker line to include company name if mapping provided
             if mapping is not None and replace_ticker_line is not None:
                 permno_val = extras.get("permno")
