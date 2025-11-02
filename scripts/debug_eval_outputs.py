@@ -13,6 +13,7 @@ import csv
 from pathlib import Path
 from typing import List, Dict, Any
 
+import numpy as np
 import torch
 
 from src.backends.hf_infer import (
@@ -20,6 +21,7 @@ from src.backends.hf_infer import (
     load_model_and_tokenizer,
     infer_chat_batch,
     extract_pred,
+    LOG_EPS,
 )
 
 
@@ -76,7 +78,15 @@ def main() -> None:
         )
         for idx, completion in zip(batch, completions):
             raw_outputs.append(completion)
-            preds.append(extract_pred(completion, holding_ts[idx]))
+            preds.append(extract_pred(completion))
+
+    def to_tp1(log_delta, holding):
+        if log_delta is None or holding is None:
+            return None
+        try:
+            return float(np.exp(log_delta) * (holding + LOG_EPS) - LOG_EPS)
+        except Exception:
+            return None
 
     rows: List[Dict[str, Any]] = []
     for idx, quarter, yt, ht, raw, pred in zip(ids, quarters, y_true, holding_ts, raw_outputs, preds):
@@ -87,16 +97,15 @@ def main() -> None:
             "y_true": yt,
             "raw_output": raw,
             "parsed_pred": pred,
-            "true_delta": None,
-            "pred_delta": None,
+            "true_tp1": to_tp1(yt, ht),
+            "pred_tp1": to_tp1(pred, ht),
             "abs_error": None,
+            "abs_tp1_error": None,
         }
-        if ht is not None and yt is not None:
-            entry["true_delta"] = yt - ht
-        if pred is not None and ht is not None:
-            entry["pred_delta"] = pred - ht
         if pred is not None and yt is not None:
             entry["abs_error"] = abs(pred - yt)
+        if entry["pred_tp1"] is not None and entry["true_tp1"] is not None:
+            entry["abs_tp1_error"] = abs(entry["pred_tp1"] - entry["true_tp1"])
         rows.append(entry)
 
     out_path = Path(args.out_csv)
@@ -111,9 +120,10 @@ def main() -> None:
                 "y_true",
                 "raw_output",
                 "parsed_pred",
-                "true_delta",
-                "pred_delta",
                 "abs_error",
+                "true_tp1",
+                "pred_tp1",
+                "abs_tp1_error",
             ],
         )
         writer.writeheader()

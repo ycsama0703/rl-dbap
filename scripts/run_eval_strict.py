@@ -23,6 +23,7 @@ from src.backends.hf_infer import (
     load_model_and_tokenizer,
     infer_chat_batch,
     extract_pred,
+    LOG_EPS,
 )
 from src.evaluation.metrics import basic_regression, topk
 
@@ -64,7 +65,7 @@ def run_eval_strict(
         )
         for idx, completion in zip(batch, completions):
             raw_outputs.append(completion)
-            preds.append(extract_pred(completion, holding_ts[idx]))
+            preds.append(extract_pred(completion))
 
     df = pd.DataFrame(
         {
@@ -77,6 +78,26 @@ def run_eval_strict(
         }
     ).set_index("id")
     df["valid"] = df["y_pred"].notna()
+
+    def to_tp1(log_delta, holding):
+        if log_delta is None or holding is None:
+            return np.nan
+        try:
+            return float(np.exp(log_delta) * (holding + LOG_EPS) - LOG_EPS)
+        except Exception:
+            return np.nan
+
+    df["y_true_tp1"] = [
+        to_tp1(log_val, ht) for log_val, ht in zip(df["y_true"], df["holding_t"])
+    ]
+    df["y_pred_tp1"] = [
+        to_tp1(pred, ht) if pred is not None else np.nan for pred, ht in zip(df["y_pred"], df["holding_t"])
+    ]
+    df["abs_log_error"] = (df["y_pred"] - df["y_true"]).abs()
+    if "y_pred_tp1" in df.columns:
+        df["abs_tp1_error"] = (df["y_pred_tp1"] - df["y_true_tp1"]).abs()
+    else:
+        df["abs_tp1_error"] = np.nan
     return df
 
 
@@ -120,36 +141,68 @@ def main() -> None:
             [
                 {
                     "coverage%": coverage,
-                    "MAE": np.nan,
-                    "RMSE": np.nan,
-                    "R2": np.nan,
-                    "sMAPE%": np.nan,
-                    "IC": np.nan,
-                    "RankIC": np.nan,
-                    "Recall@50": np.nan,
-                    "Precision@50": np.nan,
-                    "NDCG@50": np.nan,
+                    "MAE_log": np.nan,
+                    "RMSE_log": np.nan,
+                    "R2_log": np.nan,
+                    "sMAPE_log%": np.nan,
+                    "IC_log": np.nan,
+                    "RankIC_log": np.nan,
+                    "Recall@50_log": np.nan,
+                    "Precision@50_log": np.nan,
+                    "NDCG@50_log": np.nan,
+                    "MAE_tp1": np.nan,
+                    "RMSE_tp1": np.nan,
+                    "R2_tp1": np.nan,
+                    "sMAPE_tp1%": np.nan,
+                    "IC_tp1": np.nan,
+                    "RankIC_tp1": np.nan,
+                    "Recall@50_tp1": np.nan,
+                    "Precision@50_tp1": np.nan,
+                    "NDCG@50_tp1": np.nan,
                 }
             ]
         ).to_csv(out_dir / "metrics.csv", index=False)
         return
 
-    mae, rmse, r2, sm, ic, ric = basic_regression(valid)
-    rec, pre, ndcg = topk(valid, "quarter", k=50)
+    mae_log, rmse_log, r2_log, sm_log, ic_log, ric_log = basic_regression(valid)
+    rec_log, pre_log, ndcg_log = topk(valid, "quarter", k=50)
+
+    valid_abs = valid.dropna(subset=["y_true_tp1", "y_pred_tp1"]).copy()
+    if not valid_abs.empty:
+        subset_cols = ["y_true_tp1", "y_pred_tp1", "quarter"]
+        if "id" in valid_abs.columns:
+            subset_cols.append("id")
+        valid_abs_metrics = valid_abs[subset_cols].rename(
+            columns={"y_true_tp1": "y_true", "y_pred_tp1": "y_pred"}
+        )
+        mae_tp1, rmse_tp1, r2_tp1, sm_tp1, ic_tp1, ric_tp1 = basic_regression(valid_abs_metrics)
+        rec_tp1, pre_tp1, ndcg_tp1 = topk(valid_abs_metrics, "quarter", k=50)
+    else:
+        mae_tp1 = rmse_tp1 = r2_tp1 = sm_tp1 = ic_tp1 = ric_tp1 = np.nan
+        rec_tp1 = pre_tp1 = ndcg_tp1 = np.nan
 
     pd.DataFrame(
         [
             {
                 "coverage%": coverage,
-                "MAE": mae,
-                "RMSE": rmse,
-                "R2": r2,
-                "sMAPE%": sm,
-                "IC": ic,
-                "RankIC": ric,
-                "Recall@50": rec,
-                "Precision@50": pre,
-                "NDCG@50": ndcg,
+                "MAE_log": mae_log,
+                "RMSE_log": rmse_log,
+                "R2_log": r2_log,
+                "sMAPE_log%": sm_log,
+                "IC_log": ic_log,
+                "RankIC_log": ric_log,
+                "Recall@50_log": rec_log,
+                "Precision@50_log": pre_log,
+                "NDCG@50_log": ndcg_log,
+                "MAE_tp1": mae_tp1,
+                "RMSE_tp1": rmse_tp1,
+                "R2_tp1": r2_tp1,
+                "sMAPE_tp1%": sm_tp1,
+                "IC_tp1": ic_tp1,
+                "RankIC_tp1": ric_tp1,
+                "Recall@50_tp1": rec_tp1,
+                "Precision@50_tp1": pre_tp1,
+                "NDCG@50_tp1": ndcg_tp1,
             }
         ]
     ).to_csv(out_dir / "metrics.csv", index=False)

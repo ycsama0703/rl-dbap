@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence
+import math
 import pandas as pd
 
 
@@ -39,6 +40,21 @@ def _fmt(x):
         return str(x)
 
 
+LOG_EPS = 1e-6
+
+
+def _safe_nonneg(x: float | int | None) -> float | None:
+    if x is None:
+        return None
+    try:
+        v = float(x)
+        if pd.isna(v) or v < 0:
+            return None
+        return v
+    except Exception:
+        return None
+
+
 def build_history_prompt(
     hist_rows: Sequence[PromptRow],
     hide_date: bool = True,
@@ -71,26 +87,26 @@ def build_history_prompt(
 
     # history changes (if available)
     def change(prev: PromptRow, curr: PromptRow) -> str:
+        prev_val = _safe_nonneg(prev.holding_t)
+        curr_val = _safe_nonneg(curr.holding_t)
+        if prev_val is None or curr_val is None:
+            return "NA"
         try:
-            if prev.holding_t is None or curr.holding_t is None:
-                return "NA"
-            if pd.isna(prev.holding_t) or pd.isna(curr.holding_t):
-                return "NA"
-            diff = float(curr.holding_t) - float(prev.holding_t)
-            s = f"{diff:.2f}".rstrip('0').rstrip('.')
-            if s == "-0":
-                s = "0"
-            return s
+            ratio = math.log((curr_val + LOG_EPS) / (prev_val + LOG_EPS))
         except Exception:
             return "NA"
+        s = f"{ratio:.4f}".rstrip('0').rstrip('.')
+        if s == "-0":
+            s = "0"
+        return s
 
     if strict_contract:
         header = (
             f"Act as a {role_phrase} portfolio manager.\n\n"
             f"Your goal is to adjust your portfolio holdings for {{ticker}} according to the change in fundamental data.\n"
-            f"\"holding_delta\" means the ABSOLUTE change in holdings (same units as holding).\n"
-            f"Formula: holding_delta = holding_tp1 - holding_t.\n"
-            f"Direction is given by the sign of holding_delta; lower bound holding_delta ≥ -holding_t.\n\n"
+            f"\"holding_log_delta\" means the log change in holdings.\n"
+            f"Formula: holding_log_delta = log((holding_tp1 + {LOG_EPS:.0e}) / (holding_t + {LOG_EPS:.0e})).\n"
+            f"This smooths scale differences while keeping the adjustment direction.\n\n"
         )
     else:
         header = (
@@ -99,9 +115,9 @@ def build_history_prompt(
         )
 
     hist = (
-        f"{{t-3 data}}\n{block('', r_tm3)}\nholding_delta: {change(r_tm3, r_tm2)}\n\n"
-        f"{{t-2 data}}\n{block('', r_tm2)}\nholding_delta: {change(r_tm2, r_tm1)}\n\n"
-        f"{{t-1 data}}\n{block('', r_tm1)}\nholding_delta: {change(r_tm1, r_t)}\n\n"
+        f"{{t-3 data}}\n{block('', r_tm3)}\nholding_log_delta: {change(r_tm3, r_tm2)}\n\n"
+        f"{{t-2 data}}\n{block('', r_tm2)}\nholding_log_delta: {change(r_tm2, r_tm1)}\n\n"
+        f"{{t-1 data}}\n{block('', r_tm1)}\nholding_log_delta: {change(r_tm1, r_t)}\n\n"
     )
 
     now_block = f"Now, these are the new data:\n{block('{t data}', r_t)}\n\n"
@@ -116,12 +132,12 @@ def build_history_prompt(
             "   - Example style: <think>me↓ (-15%), profit↑ (+0.02) → moderate increase in holding.</think>\n\n"
             "2. Immediately after </think>, output a single <answer>...</answer> block.\n"
             "   - Inside <answer>, output exactly ONE valid JSON object:\n"
-            "     {\"holding_delta\": <float>}\n"
+            "     {\"holding_log_delta\": <float>}\n"
             "   - The float must have 2 decimal places, no scientific notation.\n"
-            "   - Example: <answer>{\"holding_delta\": 0.31}</answer>\n\n"
+            "   - Example: <answer>{\"holding_log_delta\": 0.31}</answer>\n\n"
             "The final output should look EXACTLY like this example (structure only):\n\n"
             "<think>...</think>\n"
-            "<answer>{\"holding_delta\": 0.00}</answer>\n\n"
+            "<answer>{\"holding_log_delta\": 0.00}</answer>\n\n"
         )
     else:
         instructions = ""
@@ -137,11 +153,21 @@ def build_history_prompt(
         "holding_t": r_t.holding_t,
         "label_tp1": (float(r_t.holding_t1) if r_t.holding_t1 is not None and not pd.isna(r_t.holding_t1) else None),
         "label_delta": None,
+        "label_log_delta": None,
+        "label_delta_absolute": None,
     }
     if extras["holding_t"] is not None and extras["label_tp1"] is not None:
         try:
-            extras["label_delta"] = float(extras["label_tp1"]) - float(extras["holding_t"])  # type: ignore
+            ht = float(extras["holding_t"])  # type: ignore[arg-type]
+            tp1 = float(extras["label_tp1"])  # type: ignore[arg-type]
+            extras["label_delta_absolute"] = tp1 - ht
+            if ht >= 0 and tp1 >= 0:
+                log_delta = math.log((tp1 + LOG_EPS) / (ht + LOG_EPS))
+                extras["label_log_delta"] = log_delta
+                extras["label_delta"] = log_delta
         except Exception:
             extras["label_delta"] = None
+            extras["label_log_delta"] = None
+            extras["label_delta_absolute"] = None
 
     return prompt, extras

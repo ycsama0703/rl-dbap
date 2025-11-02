@@ -28,8 +28,8 @@ GRADIENT_ACCUM_STEPS=8
 LORA_RANK=32
 LORA_ALPHA=128
 # 固定使用格式/数值奖励组合
-REWARD_FUNCS=(contract_holdings mse_holdings)
-REWARD_WEIGHTS=(0.3 0.7)
+REWARD_FUNCS=(contract_holdings direction_holdings magnitude_holdings)
+REWARD_WEIGHTS=(0.2 0.4 0.4)
 
 # Optional logging targets (can also be supplied via environment variables, e.g. SWIFT_REPORT_TO=swanlab)
 REPORT_TO="${SWIFT_REPORT_TO:-}"
@@ -182,6 +182,7 @@ swift rlhf \
   --beta 0.02 \
   --log_completions true \
   --reward_weights ${REWARD_WEIGHTS[@]} \
+  --reward_kwargs '{"direction_holdings":{"direction_eps":1e-4},"magnitude_holdings":{"threshold":0.2}}' \
   $( [[ -n "$STOP_WORDS" ]] && echo --stop_words "$STOP_WORDS" ) \
   "${EXTRA_ARGS[@]}" \
   "${EXTRA_VLLM_ARGS[@]}" \

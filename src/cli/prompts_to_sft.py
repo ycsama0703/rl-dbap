@@ -1,9 +1,26 @@
 # src/cli/prompts_to_sft.py
 
 from __future__ import annotations
-import argparse, json, re
+import argparse, json, math, re
 from pathlib import Path
 from typing import Callable, Dict
+
+
+LOG_EPS = 1e-6
+
+
+def _safe_nonneg(value: float | int | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        v = float(value)
+        if math.isnan(v):
+            return None
+        if v < 0:
+            return None
+        return v
+    except Exception:
+        return None
 
 
 def _resolve_absolute(rec: dict) -> float | None:
@@ -13,20 +30,33 @@ def _resolve_absolute(rec: dict) -> float | None:
             return float(rec["label"])  # absolute
         if rec.get("label_tp1") is not None:
             return float(rec["label_tp1"])  # absolute
+        if rec.get("label_delta_absolute") is not None and rec.get("holding_t") is not None:
+            return float(rec["holding_t"]) + float(rec["label_delta_absolute"])  # reconstruct from absolute delta
         if rec.get("label_delta") is not None and rec.get("holding_t") is not None:
-            return float(rec["holding_t"]) + float(rec["label_delta"])  # reconstruct
+            # legacy fallback where label_delta stored absolute change
+            return float(rec["holding_t"]) + float(rec["label_delta"])
     except Exception:
         return None
     return None
 
 
-def _resolve_delta(rec: dict) -> float | None:
-    """Resolve holding_delta value."""
+def _resolve_log_delta(rec: dict) -> float | None:
+    """Resolve holding_log_delta value."""
     try:
+        if rec.get("label_log_delta") is not None:
+            return float(rec["label_log_delta"])
         if rec.get("label_delta") is not None:
+            # allow fallback when upstream already overwrote label_delta with log delta
             return float(rec["label_delta"])
-        if rec.get("label_tp1") is not None and rec.get("holding_t") is not None:
-            return float(rec["label_tp1"]) - float(rec["holding_t"])
+        ht = rec.get("holding_t")
+        tp1 = rec.get("label_tp1") if rec.get("label_tp1") is not None else rec.get("label")
+        if tp1 is None and rec.get("label_delta_absolute") is not None and ht is not None:
+            tp1 = float(ht) + float(rec["label_delta_absolute"])
+        ht_val = _safe_nonneg(ht)
+        tp1_val = _safe_nonneg(tp1)
+        if ht_val is None or tp1_val is None:
+            return None
+        return math.log((tp1_val + LOG_EPS) / (ht_val + LOG_EPS))
     except Exception:
         return None
     return None
@@ -106,8 +136,8 @@ def main():
                     help="Embed a <think>...</think> block before the final answer (default: enabled)")
     ap.add_argument("--no-think", dest="with_think", action="store_false",
                     help="Do not include the <think> block")
-    ap.add_argument("--contract-mode", choices=["absolute", "delta"], default="delta",
-                    help="Select prediction target: absolute holding_tp1 or holding_delta.")
+    ap.add_argument("--contract-mode", choices=["absolute", "log_delta", "delta"], default="log_delta",
+                    help="Select prediction target: absolute holding_tp1 or log change in holdings.")
     ap.add_argument("--think-template", type=str,
                     default="",
                     help="Inner text for the <think> block when --with-think is enabled.")
@@ -121,12 +151,17 @@ def main():
     outp.parent.mkdir(parents=True, exist_ok=True)
 
     resolver: Callable[[dict], float | None]
-    if args.contract_mode == "absolute":
+    mode = args.contract_mode
+    if mode == "delta":
+        mode = "log_delta"
+    if mode == "absolute":
         resolver = _resolve_absolute
         answer_key = "holding_tp1"
+    elif mode == "log_delta":
+        resolver = _resolve_log_delta
+        answer_key = "holding_log_delta"
     else:
-        resolver = _resolve_delta
-        answer_key = "holding_delta"
+        raise ValueError(f"Unsupported contract_mode: {args.contract_mode}")
 
     n = 0
     with outp.open("w", encoding="utf-8") as fout:
@@ -148,7 +183,7 @@ def main():
                         {"role": "user", "content": prompt},
                     ]
 
-                    assistant_parts = []
+                    assistant_msgs = []
                     if args.with_think:
                         think_text = args.think_template.strip()
                         if not think_text:
@@ -157,13 +192,10 @@ def main():
                             think_lower = think_text.lower()
                             if not think_lower.startswith("<think>"):
                                 think_text = f"<think>{think_text}</think>"
-                            assistant_parts.append(think_text)
-                    assistant_parts.append(f"<answer>{resp}</answer>")
+                            assistant_msgs.append({"role": "assistant", "content": think_text, "loss": False})
+                    assistant_msgs.append({"role": "assistant", "content": f"<answer>{resp}</answer>", "loss": True})
 
-                    assistant_msg = "\n".join(assistant_parts)
-                    msgs.append({"role": "assistant", "content": assistant_msg, "loss": True})
-
-                    out = {"messages": msgs}
+                    out = {"messages": msgs + assistant_msgs}
 
                     fout.write(json.dumps(out, ensure_ascii=False) + "\n")
                     n += 1

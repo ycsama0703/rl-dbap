@@ -26,6 +26,10 @@ def compute_metrics(path: Path, out_csv: Optional[Path] = None) -> pd.DataFrame:
 
     df["y_pred"] = pd.to_numeric(df["parsed_pred"], errors="coerce")
     df["y_true"] = pd.to_numeric(df["y_true"], errors="coerce")
+    if "true_tp1" in df.columns:
+        df["true_tp1"] = pd.to_numeric(df["true_tp1"], errors="coerce")
+    if "pred_tp1" in df.columns:
+        df["pred_tp1"] = pd.to_numeric(df["pred_tp1"], errors="coerce")
     if "holding_t" in df.columns:
         df["holding_t"] = pd.to_numeric(df["holding_t"], errors="coerce")
     if "quarter" not in df.columns:
@@ -38,22 +42,49 @@ def compute_metrics(path: Path, out_csv: Optional[Path] = None) -> pd.DataFrame:
 
     valid = valid.set_index("id", drop=False) if "id" in valid.columns else valid
 
-    mae, rmse, r2, smape, ic, ric = basic_regression(valid)
-    rec, pre, ndcg = topk(valid, "quarter", k=50)
+    mae_log, rmse_log, r2_log, smape_log, ic_log, ric_log = basic_regression(valid)
+    rec_log, pre_log, ndcg_log = topk(valid, "quarter", k=50)
+
+    has_tp1_cols = {"true_tp1", "pred_tp1"}.issubset(valid.columns)
+    if has_tp1_cols:
+        valid_abs = valid.dropna(subset=["true_tp1", "pred_tp1"]).copy()
+    else:
+        valid_abs = pd.DataFrame()
+    if has_tp1_cols and not valid_abs.empty:
+        subset_cols = ["true_tp1", "pred_tp1", "quarter"]
+        if "id" in valid_abs.columns:
+            subset_cols.append("id")
+        valid_abs_metrics = valid_abs[subset_cols].rename(
+            columns={"true_tp1": "y_true", "pred_tp1": "y_pred"}
+        )
+        mae_tp1, rmse_tp1, r2_tp1, smape_tp1, ic_tp1, ric_tp1 = basic_regression(valid_abs_metrics)
+        rec_tp1, pre_tp1, ndcg_tp1 = topk(valid_abs_metrics, "quarter", k=50)
+    else:
+        mae_tp1 = rmse_tp1 = r2_tp1 = smape_tp1 = ic_tp1 = ric_tp1 = np.nan
+        rec_tp1 = pre_tp1 = ndcg_tp1 = np.nan
 
     metrics_df = pd.DataFrame(
         [
             {
                 "coverage%": coverage,
-                "MAE": mae,
-                "RMSE": rmse,
-                "R2": r2,
-                "sMAPE%": smape,
-                "IC": ic,
-                "RankIC": ric,
-                "Recall@50": rec,
-                "Precision@50": pre,
-                "NDCG@50": ndcg,
+                "MAE_log": mae_log,
+                "RMSE_log": rmse_log,
+                "R2_log": r2_log,
+                "sMAPE_log%": smape_log,
+                "IC_log": ic_log,
+                "RankIC_log": ric_log,
+                "Recall@50_log": rec_log,
+                "Precision@50_log": pre_log,
+                "NDCG@50_log": ndcg_log,
+                "MAE_tp1": mae_tp1,
+                "RMSE_tp1": rmse_tp1,
+                "R2_tp1": r2_tp1,
+                "sMAPE_tp1%": smape_tp1,
+                "IC_tp1": ic_tp1,
+                "RankIC_tp1": ric_tp1,
+                "Recall@50_tp1": rec_tp1,
+                "Precision@50_tp1": pre_tp1,
+                "NDCG@50_tp1": ndcg_tp1,
             }
         ]
     )

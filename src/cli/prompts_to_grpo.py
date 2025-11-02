@@ -36,13 +36,15 @@ def main():
                     if not args.no_think_example:
                         messages.append({
                             "role": "assistant",
-                            "content": "<think>\n• Compare shifts in fundamentals (me, be, profit, Gat, beta).\n• Tie direction+magnitude to holding_t and recent deltas.\n• Check bounds: holding_tp1 ≥ 0, holding_delta ≥ -holding_t.\n</think>",
+                            "content": "<think>\nCompare shifts in fundamentals (me, be, profit, Gat, beta).\nLink them to holding_t, recent history, and expected log change.\nReminder: holding_log_delta = log((holding_tp1 + 1e-6) / (holding_t + 1e-6)).\n</think>",
                             "loss": False,
                         })
                     out = {
                         "messages": messages,
                         # pass-through fields for reward
-                        "label_delta": rec.get("label_delta"),
+                        "label_delta": rec.get("label_log_delta") or rec.get("label_delta"),
+                        "label_log_delta": rec.get("label_log_delta") or rec.get("label_delta"),
+                        "label_delta_absolute": rec.get("label_delta_absolute"),
                         "label_tp1": rec.get("label_tp1") or rec.get("label"),
                         "holding_t": rec.get("holding_t"),
                         # optional metadata

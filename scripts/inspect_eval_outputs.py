@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any
 
+import numpy as np
 import torch
 
 from src.backends.hf_infer import (
@@ -20,6 +21,7 @@ from src.backends.hf_infer import (
     load_model_and_tokenizer,
     extract_pred,
     infer_chat_batch,
+    LOG_EPS,
 )
 
 
@@ -139,11 +141,19 @@ def main() -> None:
         for idx, decoded in zip(batch_indices, completions):
             decoded = decoded.strip()
             raw_outputs.append(decoded)
-            preds.append(extract_pred(decoded, holding_ts[idx]))
+            preds.append(extract_pred(decoded))
 
     records: List[Dict[str, Any]] = []
     fail_count = 0
     ones_count = 0
+
+    def to_tp1(log_delta, holding):
+        if log_delta is None or holding is None:
+            return None
+        try:
+            return float(np.exp(log_delta) * (holding + LOG_EPS) - LOG_EPS)
+        except Exception:
+            return None
 
     for i, (idx, quarter, yt, ht, raw, pred) in enumerate(
         zip(ids, quarters, y_true, holding_ts, raw_outputs, preds)
@@ -161,6 +171,8 @@ def main() -> None:
                 "holding_t": ht,
                 "raw_output": raw,
                 "parsed_pred": parsed,
+                "true_tp1": to_tp1(yt, ht),
+                "pred_tp1": to_tp1(parsed, ht),
             }
         )
 
@@ -172,7 +184,8 @@ def main() -> None:
     print("\n=== sample outputs ===")
     for rec in records[:5]:
         print(
-            f"id={rec['id']} quarter={rec['quarter']} holding_t={rec['holding_t']} y_true={rec['y_true']} parsed={rec['parsed_pred']}"
+            f"id={rec['id']} quarter={rec['quarter']} holding_t={rec['holding_t']} "
+            f"log_true={rec['y_true']} log_pred={rec['parsed_pred']}"
         )
         print(rec["raw_output"])
         print("-" * 40)

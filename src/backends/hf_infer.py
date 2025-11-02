@@ -6,9 +6,10 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
 
-_JSON_RE = re.compile(r'\{.*\}', re.S)
-_FLOAT_RE = re.compile(r'-?\d+(\.\d+)?([eE][+-]?\d+)?')
-_HOLDING_T_PATTERN = re.compile(r'Now,.*?holding\s*=\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)', re.S)
+_JSON_RE = re.compile(r'\{.*?\}', re.S)
+_FLOAT_RE = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?')
+_HOLDING_T_PATTERN = re.compile(r'holding\s*=\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)', re.IGNORECASE)
+LOG_EPS = 1e-6
 
 
 def load_samples(fp: str):
@@ -32,48 +33,49 @@ def parse_quarter_from_user(user_text: str) -> str:
 
 
 def extract_y_true(assistant_content: str):
-    try:
-        v = float(json.loads(assistant_content)["holding_tp1"])
-        return max(v, 0.0)
-    except Exception:
-        m = _JSON_RE.search(assistant_content)
-        if not m: return None
-        try:
-            v = float(json.loads(m.group(0))["holding_tp1"])
-            return max(v, 0.0)
-        except Exception:
-            return None
-
-
-def extract_pred(text: str, holding_t: float | None = None):
-    m = _JSON_RE.search(text)
-    if m:
-        try:
-            obj = json.loads(m.group(0))
-            if obj.get("holding_tp1") is not None:
-                v = float(obj.get("holding_tp1"))
-                if math.isfinite(v):
-                    return max(v, 0.0)
-            if obj.get("holding_delta") is not None and holding_t is not None:
-                delta = float(obj.get("holding_delta"))
-                if math.isfinite(delta) and math.isfinite(holding_t):
-                    v = holding_t + delta
-                    if math.isfinite(v):
-                        return max(v, 0.0)
-        except Exception:
-            pass
-    m2 = _FLOAT_RE.search(text)
-    if not m2:
+    """Extract ground-truth holding_log_delta from assistant message."""
+    if not assistant_content:
         return None
     try:
-        v = float(m2.group(0))
-        if math.isfinite(v):
-            if holding_t is not None:
-                v = holding_t + v
-            return max(v, 0.0)
+        obj = json.loads(assistant_content)
+        if "holding_log_delta" in obj:
+            val = float(obj["holding_log_delta"])
+            return val if math.isfinite(val) else None
+    except Exception:
+        pass
+    m = _JSON_RE.search(assistant_content)
+    if not m:
+        return None
+    try:
+        obj = json.loads(m.group(0))
+        if "holding_log_delta" in obj:
+            val = float(obj["holding_log_delta"])
+            return val if math.isfinite(val) else None
     except Exception:
         return None
     return None
+
+
+def extract_pred(text: str) -> float | None:
+    """Extract predicted holding_log_delta from model completion."""
+    m = _JSON_RE.search(text or "")
+    if m:
+        try:
+            obj = json.loads(m.group(0))
+            if obj.get("holding_log_delta") is not None:
+                val = float(obj["holding_log_delta"])
+                if math.isfinite(val):
+                    return val
+        except Exception:
+            pass
+    m2 = _FLOAT_RE.search(text or "")
+    if not m2:
+        return None
+    try:
+        val = float(m2.group(0))
+        return val if math.isfinite(val) else None
+    except Exception:
+        return None
 
 
 def load_model_and_tokenizer(base_model: str, lora_path: str|None, torch_dtype="bfloat16"):

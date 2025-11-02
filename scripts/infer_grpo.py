@@ -153,10 +153,10 @@ def main():
     print(output)
     parsed = extract_pred(output)
     if parsed is not None:
-        print("\n=== Parsed holding_tp1 ===")
+        print("\n=== Parsed holding_log_delta ===")
         print(parsed)
     else:
-        print("\n(No numeric holding_tp1 found in output.)")
+        print("\n(No holding_log_delta found in output.)")
 
 
 if __name__ == "__main__":

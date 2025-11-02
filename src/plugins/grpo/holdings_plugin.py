@@ -63,13 +63,12 @@ def _extract_json_from_answer(text: str):
 class ContractHoldingsORM(ORM):
     """Format/number contract for holdings output while allowing reasoning.
 
-    - Extracts the first occurrence of {"holding_delta": <num>} from the <answer> body (tolerates extra text).
-    - Numeric value must be a finite decimal with up to 6 decimals.
-    - Bounds: holding_delta >= -holding_t (when provided).
-    Reward: +1.0 if a valid value is found and passes bounds, else -1.0.
+    - Extracts the first occurrence of {"holding_log_delta": <num>} from the <answer> body (tolerates extra text).
+    - Numeric value must be finite (no NaN/inf) with up to 6 decimals.
+    Reward: +1.0 if a valid value is found, else -1.0.
     """
 
-    _DELTA_SEARCH = re.compile(r'"holding_delta"\s*:\s*(-?\d+(?:\.\d{1,6})?)', re.IGNORECASE)
+    _LOG_DELTA_SEARCH = re.compile(r'"holding_log_delta"\s*:\s*(-?\d+(?:\.\d{1,6})?)', re.IGNORECASE)
 
     def __call__(self, completions, holding_t=None, **kwargs) -> List[float]:
         rewards: List[float] = []
@@ -97,10 +96,10 @@ class ContractHoldingsORM(ORM):
                 # Accept values inside <answer> or anywhere in completion as fallback
                 body = _extract_answer_body(comp) or comp or ""
 
-                m = self._DELTA_SEARCH.search(body)
+                m = self._LOG_DELTA_SEARCH.search(body)
                 if m:
                     val = float(m.group(1))
-                    if ht is not None and val < -float(ht):
+                    if not math.isfinite(val):
                         rewards.append(-1.0)
                         continue
                     rewards.append(1.0)
@@ -251,66 +250,93 @@ orms['external_holdings'] = HoldingsDeltaORM
 orms['contract_holdings'] = ContractHoldingsORM
 
 
-class MSEHoldingsORM(ORM):
-    """Pure MSE reward on holding_delta (or derived from holding_tp1).
+class DirectionHoldingsORM(ORM):
+    """Reward based on whether predicted log change matches the true direction."""
 
-    - Prediction is parsed from JSON in <answer>...</answer> (fallback: anywhere),
-      using keys: `holding_delta` or `holding_tp1` with `holding_t`.
-    - Target is `label_delta` or (`label_tp1` - `holding_t`).
-    - Reward scaled to [-1, +1]. If pred/target is missing, reward = -1.0.
-    """
-
-    def __call__(self, completions, label_delta=None, label_tp1=None, holding_t=None, **kwargs) -> List[float]:
+    def __call__(self, completions, label_delta=None, **kwargs) -> List[float]:
         if not isinstance(label_delta, list):
             label_delta = [label_delta] * len(completions)
-        if not isinstance(label_tp1, list):
-            label_tp1 = [label_tp1] * len(completions)
-        if not isinstance(holding_t, list):
-            holding_t = [holding_t] * len(completions)
 
-        errors: list[float | None] = []
-        for comp, gt_delta, gt_tp1, ht in zip(completions, label_delta, label_tp1, holding_t):
+        rewards: List[float] = []
+        eps = float(kwargs.get("direction_eps", 1e-4))
+
+        for comp, tgt in zip(completions, label_delta):
             pred = None
             try:
                 obj = _extract_json_from_answer(comp)
-                if isinstance(obj, dict):
-                    if obj.get('holding_delta') is not None:
-                        pred = float(obj['holding_delta'])
+                if isinstance(obj, dict) and obj.get("holding_log_delta") is not None:
+                    pred = float(obj["holding_log_delta"])
             except Exception:
                 pred = None
 
-            tgt = None
             try:
-                if gt_delta is not None:
-                    tgt = float(gt_delta)
+                tgt_val = float(tgt) if tgt is not None else None
             except Exception:
-                tgt = None
+                tgt_val = None
 
-            if pred is None or tgt is None:
-                errors.append(None)
-                continue
-
-            errors.append(pred - tgt)
-
-        rewards: List[float] = []
-        valid_errors = [abs(e) for e in errors if e is not None]
-        if valid_errors:
-            scale = float(np.percentile(valid_errors, 95))
-        else:
-            scale = 1.0
-        scale = max(scale, 1e-6)
-
-        for err in errors:
-            if err is None:
+            if pred is None or tgt_val is None or not math.isfinite(pred) or not math.isfinite(tgt_val):
                 rewards.append(-1.0)
                 continue
-            x = err / scale
-            sim01 = 1.0 - min(x * x, 4.0) / 4.0  # clamp when |x| >= 2
-            r_mse = 2.0 * sim01 - 1.0
-            rewards.append(float(r_mse))
+
+            ap = abs(pred)
+            at = abs(tgt_val)
+            if ap <= eps and at <= eps:
+                rewards.append(0.0)
+                continue
+
+            if ap <= eps:
+                rewards.append(-1.0)
+                continue
+            if at <= eps:
+                rewards.append(0.0)
+                continue
+
+            same_dir = pred * tgt_val >= 0.0
+            rewards.append(1.0 if same_dir else -1.0)
 
         return rewards
 
 
-# register: pure MSE reward
-orms['mse_holdings'] = MSEHoldingsORM
+orms["direction_holdings"] = DirectionHoldingsORM
+
+
+class MagnitudeHoldingsORM(ORM):
+    """Reward for magnitude closeness; maps absolute error to [-1, 1]."""
+
+    def __call__(self, completions, label_delta=None, **kwargs) -> List[float]:
+        if not isinstance(label_delta, list):
+            label_delta = [label_delta] * len(completions)
+
+        threshold = float(kwargs.get("threshold", 0.2))
+        threshold = max(threshold, 1e-6)
+
+        rewards: List[float] = []
+        for comp, tgt in zip(completions, label_delta):
+            pred = None
+            try:
+                obj = _extract_json_from_answer(comp)
+                if isinstance(obj, dict) and obj.get("holding_log_delta") is not None:
+                    pred = float(obj["holding_log_delta"])
+            except Exception:
+                pred = None
+
+            try:
+                tgt_val = float(tgt) if tgt is not None else None
+            except Exception:
+                tgt_val = None
+
+            if pred is None or tgt_val is None or not math.isfinite(pred) or not math.isfinite(tgt_val):
+                rewards.append(-1.0)
+                continue
+
+            diff = abs(pred - tgt_val)
+            ratio = min(diff / threshold, 1.0)
+            r_mag = 1.0 - ratio
+            rewards.append(2.0 * r_mag - 1.0)
+
+        return rewards
+
+
+orms["magnitude_holdings"] = MagnitudeHoldingsORM
+
+
