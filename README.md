@@ -100,9 +100,9 @@ CUDA_VISIBLE_DEVICES=0,1 \
   --
 ```
 
-5. Strict Evaluation (No Fallback Parsing)
------------------------------------------
-Use `scripts/run_eval_strict.py` to avoid legacy parsing paths. Delete old artifacts before each run.
+5. Strict Evaluation (Legacy, optional)
+---------------------------------------
+You can still run `scripts/run_eval_strict.py` for a classic eval pass (log + absolute metrics will be written). Clear old dirs before rerunning.
 
 ```bash
 rm -rf artifacts/eval_grpo_banks_v4_strict
@@ -130,10 +130,12 @@ Each directory contains `pred_detail.csv` and `metrics.csv`.
 - `pred_detail.csv` includes `y_true`/`y_pred` (log deltas), `y_true_tp1`/`y_pred_tp1` (reconstructed holdings), and both `abs_log_error`/`abs_tp1_error`.
 - `metrics.csv` reports mirrored statistics for log deltas (`*_log`) and reconstructed holdings (`*_tp1`).
 
-6. Capture Raw Outputs for Debugging
-------------------------------------
+6. Generate Debug Outputs (official Test pipeline)
+--------------------------------------------------
+The recommended test flow is: (1) dump model generations with parse results, then (2) compute metrics from those CSVs. Run the three variants (base / SFT / GRPO) with the same test set.
+
 ```bash
-python scripts/debug_eval_outputs.py \
+PYTHONPATH=. python scripts/debug_eval_outputs.py \
   --test-path artifacts/test/test_banks.jsonl \
   --base-model Qwen/Qwen2.5-7B-Instruct \
   --lora-path outputs/grpo_banks_v4/v0-20251030-062734/checkpoint-500 \
@@ -141,7 +143,7 @@ python scripts/debug_eval_outputs.py \
   --force-think \
   --out-csv outputs/debug_eval_outputs_grpo.csv
 
-python scripts/debug_eval_outputs.py \
+PYTHONPATH=. python scripts/debug_eval_outputs.py \
   --test-path artifacts/test/test_banks.jsonl \
   --base-model Qwen/Qwen2.5-7B-Instruct \
   --lora-path outputs/sft_banks_qwen2p5/checkpoint-500 \
@@ -149,7 +151,7 @@ python scripts/debug_eval_outputs.py \
   --force-think \
   --out-csv outputs/debug_eval_outputs_sft.csv
 
-python scripts/debug_eval_outputs.py \
+PYTHONPATH=. python scripts/debug_eval_outputs.py \
   --test-path artifacts/test/test_banks.jsonl \
   --base-model Qwen/Qwen2.5-7B-Instruct \
   --lora-path None \
@@ -159,18 +161,18 @@ python scripts/debug_eval_outputs.py \
 ```
 Each CSV records the raw generations, log-space labels/predictions, reconstructed `holding_tp1`, and both log/absolute errors for downstream analysis.
 
-7. Recompute Metrics from Debug CSVs
-------------------------------------
+7. Compute Metrics from Debug CSVs
+----------------------------------
 ```bash
-python scripts/compute_metrics_from_debug.py \
+PYTHONPATH=. python scripts/compute_metrics_from_debug.py \
   --debug-csv outputs/debug_eval_outputs_grpo.csv \
   --out-csv outputs/metrics_from_debug_grpo.csv
 
-python scripts/compute_metrics_from_debug.py \
+PYTHONPATH=. python scripts/compute_metrics_from_debug.py \
   --debug-csv outputs/debug_eval_outputs_sft.csv \
   --out-csv outputs/metrics_from_debug_sft.csv
 
-python scripts/compute_metrics_from_debug.py \
+PYTHONPATH=. python scripts/compute_metrics_from_debug.py \
   --debug-csv outputs/debug_eval_outputs_base.csv \
   --out-csv outputs/metrics_from_debug_base.csv
 ```
