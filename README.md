@@ -63,120 +63,124 @@ python -m src.cli.prompts_to_sft \
   --no-think
 ```
 
-3. SFT Training (Qwen/Qwen2.5-7B-Instruct)
------------------------------------------
+3. SFT Training (single GPU example)
+------------------------------------
 ```bash
 export SWIFT_REPORT_TO=swanlab
 export SWIFT_SWANLAB_PROJECT=rl-dbap
 export SWIFT_SWANLAB_EXP_NAME=banks-sft
 
-CUDA_VISIBLE_DEVICES=0,1 \
-bash scripts/sft.sh \
+CUDA_VISIBLE_DEVICES=0 bash scripts/sft.sh \
   -m "Qwen/Qwen2.5-7B-Instruct" \
   -d artifacts/sft/sft_train_banks.jsonl \
   -o outputs/sft_banks_qwen2p5 \
   -- \
-  --per_device_train_batch_size 2 \
-  --gradient_accumulation_steps 8 \
-  --lora_rank 16 \
-  --lora_alpha 64 \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 16 \
+  --lora_rank 8 \
+  --lora_alpha 32 \
   --num_train_epochs 4
 ```
-The main checkpoint referenced later is `outputs/sft_banks_qwen2p5/checkpoint-500`.
+This produces LoRA checkpoints under `outputs/sft_banks_qwen2p5/.../checkpoint-###` (e.g. `checkpoint-500`).
 
-4. GRPO Training (Format + Direction + Magnitude Rewards)
----------------------------------------------------------
+4. GRPO Training (contract + MSE rewards)
+-----------------------------------------
+`scripts/grpo.sh` defaults to the reward pair `contract_holdings` (format contract) and `mse_holdings` (squared-error mapper) with weights `0.3/0.7`. Adjust via `-F/-W` if you want to experiment with other reward mixes.
+
 ```bash
-# reuse SWIFT_REPORT_TO / SWIFT_SWANLAB_PROJECT from above, only change the run name
+export SWIFT_REPORT_TO=swanlab
+export SWIFT_SWANLAB_PROJECT=rl-dbap
 export SWIFT_SWANLAB_EXP_NAME=banks-grpo
 
-CUDA_VISIBLE_DEVICES=0,1 \
-`scripts/grpo.sh` now defaults to a two-part reward stack: `contract_holdings` (format contract) and `mse_holdings` (squared-error mapper) with weights `0.3/0.7`. Override via `-F/-W` or adjust scaling with `--reward_kwargs mse_cap=<value>`.
+CUDA_VISIBLE_DEVICES=0 bash scripts/grpo.sh \
   -m "Qwen/Qwen2.5-7B-Instruct" \
   -d artifacts/grpo/grpo_banks.jsonl \
-  -o outputs/grpo_banks_v4 \
-  -a outputs/sft_banks_qwen2p5/checkpoint-500 \
+  -o outputs/grpo_banks_qwen2p5 \
+  -a outputs/sft_banks_qwen2p5/v0-20251103-052552/checkpoint-500 \
   -S "</answer>" \
-  --
+  -- \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 8
 ```
+Checkpoints are written to `outputs/grpo_banks_qwen2p5/.../checkpoint-*` (e.g. `checkpoint-500` or `checkpoint-400`).
 
-5. Strict Evaluation (Legacy, optional)
+5. Strict Evaluation (legacy, optional)
 ---------------------------------------
-You can still run `scripts/run_eval_strict.py` for a classic eval pass (log + absolute metrics will be written). Clear old dirs before rerunning.
+You can still run `scripts/run_eval_strict.py` for a one-shot eval; it writes the same log/absolute metrics as the debug pipeline.
 
 ```bash
-rm -rf artifacts/eval_grpo_banks_v4_strict
-python scripts/run_eval_strict.py \
+rm -rf artifacts/eval_grpo_banks_latest
+PYTHONPATH=. python scripts/run_eval_strict.py \
   --test_path artifacts/test/test_banks.jsonl \
   --base_model Qwen/Qwen2.5-7B-Instruct \
-  --lora_path outputs/grpo_banks_v4/v0-20251030-062734/checkpoint-500 \
-  --out_dir artifacts/eval_grpo_banks_v4_strict
+  --lora_path outputs/grpo_banks_qwen2p5/v3-20251103-130248/checkpoint-500 \
+  --out_dir artifacts/eval_grpo_banks_latest
 
-rm -rf artifacts/eval_sft_banks_v4_strict
-python scripts/run_eval_strict.py \
+rm -rf artifacts/eval_sft_banks_latest
+PYTHONPATH=. python scripts/run_eval_strict.py \
   --test_path artifacts/test/test_banks.jsonl \
   --base_model Qwen/Qwen2.5-7B-Instruct \
-  --lora_path outputs/sft_banks_qwen2p5/checkpoint-500 \
-  --out_dir artifacts/eval_sft_banks_v4_strict
+  --lora_path outputs/sft_banks_qwen2p5/v0-20251103-052552/checkpoint-500 \
+  --out_dir artifacts/eval_sft_banks_latest
 
-rm -rf artifacts/eval_base_banks_v4_strict
-python scripts/run_eval_strict.py \
+rm -rf artifacts/eval_base_banks_latest
+PYTHONPATH=. python scripts/run_eval_strict.py \
   --test_path artifacts/test/test_banks.jsonl \
   --base_model Qwen/Qwen2.5-7B-Instruct \
   --lora_path None \
-  --out_dir artifacts/eval_base_banks_v4_strict
+  --out_dir artifacts/eval_base_banks_latest
 ```
-Each directory contains `pred_detail.csv` and `metrics.csv`.
-- `pred_detail.csv` includes `y_true`/`y_pred` (log deltas), `y_true_tp1`/`y_pred_tp1` (reconstructed holdings), and both `abs_log_error`/`abs_tp1_error`.
-- `metrics.csv` reports mirrored statistics for log deltas (`*_log`) and reconstructed holdings (`*_tp1`).
+The outputs still contain `pred_detail.csv` (log deltas + reconstructed holdings) and `metrics.csv` (`*_log` / `*_tp1`).
 
 6. Generate Debug Outputs (official Test pipeline)
 --------------------------------------------------
-The recommended test flow is: (1) dump model generations with parse results, then (2) compute metrics from those CSVs. Run the three variants (base / SFT / GRPO) with the same test set.
+The recommended test flow is: (1) dump model generations with parse results, then (2) compute metrics from those CSVs. The example below evaluates Base, SFT checkpoint-500, and GRPO checkpoint-500; swap the LoRA path/filenames if you want to inspect another checkpoint (e.g. `checkpoint-400`).
 
 ```bash
-PYTHONPATH=. python scripts/debug_eval_outputs.py \
-  --test-path artifacts/test/test_banks.jsonl \
-  --base-model Qwen/Qwen2.5-7B-Instruct \
-  --lora-path outputs/grpo_banks_v4/v0-20251030-062734/checkpoint-500 \
-  --max-new-tokens 128 \
-  --force-think \
-  --out-csv outputs/debug_eval_outputs_grpo.csv
+export PYTHONPATH=.
 
-PYTHONPATH=. python scripts/debug_eval_outputs.py \
-  --test-path artifacts/test/test_banks.jsonl \
-  --base-model Qwen/Qwen2.5-7B-Instruct \
-  --lora-path outputs/sft_banks_qwen2p5/checkpoint-500 \
-  --max-new-tokens 128 \
-  --force-think \
-  --out-csv outputs/debug_eval_outputs_sft.csv
-
-PYTHONPATH=. python scripts/debug_eval_outputs.py \
+python scripts/debug_eval_outputs.py \
   --test-path artifacts/test/test_banks.jsonl \
   --base-model Qwen/Qwen2.5-7B-Instruct \
   --lora-path None \
   --max-new-tokens 128 \
   --force-think \
   --out-csv outputs/debug_eval_outputs_base.csv
+
+python scripts/debug_eval_outputs.py \
+  --test-path artifacts/test/test_banks.jsonl \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --lora-path outputs/sft_banks_qwen2p5/v0-20251103-052552/checkpoint-500 \
+  --max-new-tokens 128 \
+  --force-think \
+  --out-csv outputs/debug_eval_outputs_sft_ck500.csv
+
+python scripts/debug_eval_outputs.py \
+  --test-path artifacts/test/test_banks.jsonl \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --lora-path outputs/grpo_banks_qwen2p5/v3-20251103-130248/checkpoint-500 \
+  --max-new-tokens 128 \
+  --force-think \
+  --out-csv outputs/debug_eval_outputs_grpo_ck500.csv
 ```
 Each CSV records the raw generations, log-space labels/predictions, reconstructed `holding_tp1`, and both log/absolute errors for downstream analysis.
 
 7. Compute Metrics from Debug CSVs
 ----------------------------------
 ```bash
-PYTHONPATH=. python scripts/compute_metrics_from_debug.py \
-  --debug-csv outputs/debug_eval_outputs_grpo.csv \
-  --out-csv outputs/metrics_from_debug_grpo.csv
-
-PYTHONPATH=. python scripts/compute_metrics_from_debug.py \
-  --debug-csv outputs/debug_eval_outputs_sft.csv \
-  --out-csv outputs/metrics_from_debug_sft.csv
-
-PYTHONPATH=. python scripts/compute_metrics_from_debug.py \
+python scripts/compute_metrics_from_debug.py \
   --debug-csv outputs/debug_eval_outputs_base.csv \
   --out-csv outputs/metrics_from_debug_base.csv
+
+python scripts/compute_metrics_from_debug.py \
+  --debug-csv outputs/debug_eval_outputs_sft_ck500.csv \
+  --out-csv outputs/metrics_from_debug_sft_ck500.csv
+
+python scripts/compute_metrics_from_debug.py \
+  --debug-csv outputs/debug_eval_outputs_grpo_ck500.csv \
+  --out-csv outputs/metrics_from_debug_grpo_ck500.csv
 ```
-The emitted metrics columns match `run_eval_strict`, covering both log-space and reconstructed holding statistics.
+The emitted metrics mirror what `run_eval_strict.py` produces, covering both log-space and reconstructed holding statistics.
 
 ## Real-time Monitoring with SwanLab (optional)
 
