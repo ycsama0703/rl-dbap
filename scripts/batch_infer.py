@@ -197,13 +197,18 @@ def main():
             parsed_value = None
             parsed_key = None
             if isinstance(payload, dict):
-                for key in ("holding_tp1", "holding_delta"):
-                    if key in payload:
-                        value = payload[key]
-                        if isinstance(value, (int, float)):
-                            parsed_value = float(value)
-                            parsed_key = key
-                            break
+                # allow teacher outputs that expose different target keys
+                for key in ("holding_log_delta", "holding_tp1", "holding_delta"):
+                    if key not in payload:
+                        continue
+                    value = payload[key]
+                    try:
+                        parsed_value = float(value)
+                    except (TypeError, ValueError):
+                        parsed_value = None
+                    else:
+                        parsed_key = key
+                        break
             label = label_map.get(rec.get("id")) if label_map else None
             outputs.append(
                 {
@@ -213,6 +218,7 @@ def main():
                     "raw_output": text,
                     "think": think,
                     "answer": answer,
+                    "answer_payload": payload,
                     "parsed_key": parsed_key,
                     "parsed_value": parsed_value,
                     "label_tp1": label,
