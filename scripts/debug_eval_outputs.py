@@ -66,7 +66,16 @@ def main() -> None:
     preds: List[float | None] = []
 
     indices = list(range(len(chats)))
-    for batch in chunked(indices, args.batch_size):
+    iterator = chunked(indices, args.batch_size)
+    total_batches = (len(indices) + args.batch_size - 1) // args.batch_size
+    try:
+        from tqdm import tqdm  # type: ignore
+
+        iterator = tqdm(iterator, total=total_batches, desc="debug_eval")
+    except Exception:
+        pass
+
+    for batch in iterator:
         batch_msgs = [chats[i] for i in batch]
         completions = infer_chat_batch(
             tokenizer,
