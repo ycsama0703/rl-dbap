@@ -29,62 +29,156 @@ cd fdistill
 
 ## 🧰 3. 数据准备（70% GRPO + 30% SFT）
 
+仓库内的原始数据已经按公司类别拆分存放：
+
+- GRPO：`artifacts/grpo/grpo_<category>.jsonl`
+- SFT：`artifacts/sft/sft_train_<category>.jsonl`
+- `<category>` 取值：`banks`、`households`、`insurance_companies`、`investment_advisors`、`mutual_funds`、`other`、`pension_funds`
+
+运行下列脚本，将每个公司类别按 70% GRPO + 30% SFT 混合，输出到 `artifacts/distill_data/raw/train_mix_<category>.jsonl`：
+
 ```bash
-mkdir -p data/mixed
 python - <<'PY'
-import json, random
-grpo = json.load(open("data/grpo_data.json"))
-sft  = json.load(open("data/sft_data.json"))
-N = int(len(grpo) * 0.7)
-M = int(len(sft)  * 0.3)
-mix = random.sample(grpo, N) + random.sample(sft, M)
-random.shuffle(mix)
-json.dump(mix, open("data/mixed/train_mix.json", "w"), ensure_ascii=False, indent=2)
+import json
+import random
+from pathlib import Path
+
+repo_root = Path.cwd()
+grpo_dir = repo_root / "artifacts" / "grpo"
+sft_dir = repo_root / "artifacts" / "sft"
+output_dir = repo_root / "artifacts" / "distill_data" / "raw"
+output_dir.mkdir(parents=True, exist_ok=True)
+
+categories = [
+    "banks",
+    "households",
+    "insurance_companies",
+    "investment_advisors",
+    "mutual_funds",
+    "other",
+    "pension_funds",
+]
+
+def load_jsonl(path: Path):
+    with path.open("r", encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+random.seed(42)
+for cat in categories:
+    grpo_path = grpo_dir / f"grpo_{cat}.jsonl"
+    sft_path = sft_dir / f"sft_train_{cat}.jsonl"
+
+    if not grpo_path.exists() or not sft_path.exists():
+        print(f"[skip] {cat}: missing source file")
+        continue
+
+    grpo_records = load_jsonl(grpo_path)
+    sft_records = load_jsonl(sft_path)
+    if not grpo_records or not sft_records:
+        raise RuntimeError(f"{cat}: empty source data")
+
+    grpo_take = min(int(len(grpo_records) * 0.7), len(grpo_records))
+    sft_take = min(int(len(sft_records) * 0.3), len(sft_records))
+
+    mix = random.sample(grpo_records, grpo_take) + random.sample(sft_records, sft_take)
+    random.shuffle(mix)
+
+    out_path = output_dir / f"train_mix_{cat}.jsonl"
+    with out_path.open("w", encoding="utf-8") as f:
+        for rec in mix:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    print(f"[ok] {cat}: {len(mix)} records -> {out_path}")
 PY
 ```
+
+脚本执行完后，`artifacts/distill_data/raw/` 下将生成各公司的 `train_mix_<category>.jsonl`，后续步骤会基于这些文件生成教师伪标签并转成模型训练所需的 `.source/.target` 格式。
 
 ---
 
-## 🧠 4. 生成 Teacher 输出 (离线伪标签)
+## 🧠 4. 生成 Teacher 输出（离线伪标签）
 
-```bash
-cat > generate_teacher_outputs.py <<'PY'
-from peft import PeftModel
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch, json, tqdm
+1. **导出 Prompt**  
+   ```bash
+   python scripts/export_infer_prompts.py \
+     --in artifacts/distill_data/raw/train_mix_banks.jsonl \
+     --out-dir artifacts/distill_data/raw \
+     --stem banks_teacher
+   ```
+   `banks` 换成其它公司即可。脚本会生成 `banks_teacher_prompts_base.jsonl`（与 `_grpo` 内容相同，保留一份即可）。
 
-base_model_path = "<base model path>"
-lora_path = "<checkpoint path>"
-data_path = "data/mixed/train_mix.json"
-output_path = "data/mixed/teacher_outputs.json"
+2. **批量推理**  
+   ```bash
+   python scripts/batch_infer.py \
+     --jsonl artifacts/distill_data/raw/banks_teacher_prompts_base.jsonl \
+     --base_model Qwen/Qwen2.5-7B-Instruct \
+     --checkpoint outputs/grpo_banks_qwen2p5/v3-20251103-130248/checkpoint-500 \
+     --out_jsonl artifacts/distill_data/raw/teacher_outputs_banks.jsonl \
+     --batch_size 4 \
+     --max_new_tokens 512 \
+     --temperature 0.7 \
+     --torch_dtype bfloat16
+   ```
+   - `--base_model` 可换成本地缓存目录。
+   - 生成的 `teacher_outputs_<category>.jsonl` 包含完整 `<think>/<answer>` 文本以及解析出的 `holding_log_delta`。
 
-device = "cuda"
-dtype = torch.bfloat16
+3. **转换为 `.source/.target`**  
+   ```bash
+   python - <<'PY'
+   import json
+   from pathlib import Path
 
-tokenizer = AutoTokenizer.from_pretrained(base_model_path)
-base_model = AutoModelForCausalLM.from_pretrained(
-    base_model_path, torch_dtype=dtype, device_map="auto", load_in_8bit=True
-)
-model = PeftModel.from_pretrained(base_model, lora_path)
-model.eval()
+   root = Path("artifacts/distill_data")
+   raw_dir = root / "raw"
+   processed_dir = root / "processed"
+   processed_dir.mkdir(parents=True, exist_ok=True)
 
-dataset = json.load(open(data_path))
-outputs = []
-for item in tqdm.tqdm(dataset):
-    prompt = item.get("prompt", item.get("instruction", ""))
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    with torch.no_grad():
-        out = model.generate(**inputs, max_new_tokens=512, temperature=0.7)
-    text = tokenizer.decode(out[0], skip_special_tokens=True)
-    outputs.append({"prompt": prompt, "teacher_output": text})
+   categories = [
+       "banks",
+       "households",
+       "insurance_companies",
+       "investment_advisors",
+       "mutual_funds",
+       "other",
+       "pension_funds",
+   ]
 
-json.dump(outputs, open(output_path, "w"), ensure_ascii=False, indent=2)
-PY
+   for cat in categories:
+       prompt_path = raw_dir / f"{cat}_teacher_prompts_base.jsonl"
+       output_path = raw_dir / f"teacher_outputs_{cat}.jsonl"
+       if not prompt_path.exists() or not output_path.exists():
+           print(f"[skip] {cat}: missing prompts or teacher outputs")
+           continue
 
-python generate_teacher_outputs.py
-```
+       prompts = {}
+       with prompt_path.open("r", encoding="utf-8") as f:
+           for line in f:
+               rec = json.loads(line)
+               prompts[rec["id"]] = rec
 
-输出文件：`data/mixed/teacher_outputs.json`
+       generations = []
+       with output_path.open("r", encoding="utf-8") as f:
+           for line in f:
+               generations.append(json.loads(line))
+
+       out_dir = processed_dir / cat
+       out_dir.mkdir(parents=True, exist_ok=True)
+
+       with (out_dir / "train.source").open("w", encoding="utf-8") as f_src, \
+            (out_dir / "train.target").open("w", encoding="utf-8") as f_tgt:
+           for row in sorted(generations, key=lambda x: x["id"]):
+               prompt = prompts[row["id"]]
+               system = (prompt.get("system") or "").strip()
+               user = (prompt.get("prompt") or "").strip()
+               teacher = (row.get("raw_output") or "").rstrip()
+               f_src.write(f"{system}\n\n{user}\n")
+               f_tgt.write(f"{teacher}\n")
+
+       print(f"[ok] wrote {cat}: {len(generations)} samples -> {out_dir}")
+   PY
+   ```
+
+最终，蒸馏脚本的 `--data_dir` 可以直接指向 `artifacts/distill_data/processed/<category>`，其中包含 `train.source` / `train.target`（以及按需扩展的 `val.*`、`test.*`）。
 
 ---
 
