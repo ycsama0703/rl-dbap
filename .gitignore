@@ -14,6 +14,8 @@ predictions/
 !artifacts/sft/**
 !artifacts/test/
 !artifacts/test/**
+!artifacts/distill_data/
+!artifacts/distill_data/**
 
 # Large file patterns
 *.parquet

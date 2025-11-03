@@ -1,0 +1,58 @@
+{
+  "banks": {
+    "output_file": "artifacts\\distill_data\\train_mix_banks.json",
+    "grpo_source": "artifacts\\grpo\\grpo_banks.jsonl",
+    "sft_source": "artifacts\\sft\\sft_train_banks.jsonl",
+    "grpo_sampled": 1400,
+    "sft_sampled": 600,
+    "total": 2000
+  },
+  "households": {
+    "output_file": "artifacts\\distill_data\\train_mix_households.json",
+    "grpo_source": "artifacts\\grpo\\grpo_households.jsonl",
+    "sft_source": "artifacts\\sft\\sft_train_households.jsonl",
+    "grpo_sampled": 1400,
+    "sft_sampled": 600,
+    "total": 2000
+  },
+  "insurance_companies": {
+    "output_file": "artifacts\\distill_data\\train_mix_insurance_companies.json",
+    "grpo_source": "artifacts\\grpo\\grpo_insurance_companies.jsonl",
+    "sft_source": "artifacts\\sft\\sft_train_insurance_companies.jsonl",
+    "grpo_sampled": 1400,
+    "sft_sampled": 600,
+    "total": 2000
+  },
+  "investment_advisors": {
+    "output_file": "artifacts\\distill_data\\train_mix_investment_advisors.json",
+    "grpo_source": "artifacts\\grpo\\grpo_investment_advisors.jsonl",
+    "sft_source": "artifacts\\sft\\sft_train_investment_advisors.jsonl",
+    "grpo_sampled": 1400,
+    "sft_sampled": 600,
+    "total": 2000
+  },
+  "mutual_funds": {
+    "output_file": "artifacts\\distill_data\\train_mix_mutual_funds.json",
+    "grpo_source": "artifacts\\grpo\\grpo_mutual_funds.jsonl",
+    "sft_source": "artifacts\\sft\\sft_train_mutual_funds.jsonl",
+    "grpo_sampled": 1400,
+    "sft_sampled": 600,
+    "total": 2000
+  },
+  "other": {
+    "output_file": "artifacts\\distill_data\\train_mix_other.json",
+    "grpo_source": "artifacts\\grpo\\grpo_other.jsonl",
+    "sft_source": "artifacts\\sft\\sft_train_other.jsonl",
+    "grpo_sampled": 1400,
+    "sft_sampled": 600,
+    "total": 2000
+  },
+  "pension_funds": {
+    "output_file": "artifacts\\distill_data\\train_mix_pension_funds.json",
+    "grpo_source": "artifacts\\grpo\\grpo_pension_funds.jsonl",
+    "sft_source": "artifacts\\sft\\sft_train_pension_funds.jsonl",
+    "grpo_sampled": 1400,
+    "sft_sampled": 600,
+    "total": 2000
+  }
+}
