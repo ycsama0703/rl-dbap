@@ -91,7 +91,7 @@ The main checkpoint referenced later is `outputs/sft_banks_qwen2p5/checkpoint-50
 export SWIFT_SWANLAB_EXP_NAME=banks-grpo
 
 CUDA_VISIBLE_DEVICES=0,1 \
-`scripts/grpo.sh` now defaults to the reward trio `contract_holdings` (format), `direction_holdings` (direction), and `magnitude_holdings` (magnitude) with weights `0.2/0.4/0.4`, plus built-in kwargs `direction_eps=1e-4` and `threshold=0.2`. Override them via `-F/-W` or `--reward_kwargs` if needed.
+`scripts/grpo.sh` now defaults to a two-part reward stack: `contract_holdings` (format contract) and `mse_holdings` (squared-error mapper) with weights `0.3/0.7`. Override via `-F/-W` or adjust scaling with `--reward_kwargs mse_cap=<value>`.
   -m "Qwen/Qwen2.5-7B-Instruct" \
   -d artifacts/grpo/grpo_banks.jsonl \
   -o outputs/grpo_banks_v4 \

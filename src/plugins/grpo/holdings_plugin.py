@@ -340,3 +340,41 @@ class MagnitudeHoldingsORM(ORM):
 orms["magnitude_holdings"] = MagnitudeHoldingsORM
 
 
+class MSEHoldingsORM(ORM):
+    """Reward based on squared error mapped linearly into [-1, 1]."""
+
+    def __call__(self, completions, label_delta=None, **kwargs) -> List[float]:
+        if not isinstance(label_delta, list):
+            label_delta = [label_delta] * len(completions)
+
+        mse_cap = float(kwargs.get("mse_cap", 0.04))
+        mse_cap = max(mse_cap, 1e-8)
+
+        rewards: List[float] = []
+        for comp, tgt in zip(completions, label_delta):
+            pred = None
+            try:
+                obj = _extract_json_from_answer(comp)
+                if isinstance(obj, dict) and obj.get("holding_log_delta") is not None:
+                    pred = float(obj["holding_log_delta"])
+            except Exception:
+                pred = None
+
+            try:
+                tgt_val = float(tgt) if tgt is not None else None
+            except Exception:
+                tgt_val = None
+
+            if pred is None or tgt_val is None or not math.isfinite(pred) or not math.isfinite(tgt_val):
+                rewards.append(-1.0)
+                continue
+
+            mse = (pred - tgt_val) ** 2
+            ratio = min(mse / mse_cap, 1.0)
+            rewards.append(1.0 - 2.0 * ratio)
+
+        return rewards
+
+
+orms["mse_holdings"] = MSEHoldingsORM
+

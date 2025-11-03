@@ -27,9 +27,9 @@ PER_DEVICE_TRAIN_BATCH_SIZE=4
 GRADIENT_ACCUM_STEPS=8
 LORA_RANK=32
 LORA_ALPHA=128
-# 固定使用格式/方向/幅度奖励组合
-REWARD_FUNCS=(contract_holdings direction_holdings magnitude_holdings)
-REWARD_WEIGHTS=(0.2 0.4 0.4)   # 权重可按需要调整
+# 默认使用格式 + MSE 奖励
+REWARD_FUNCS=(contract_holdings mse_holdings)
+REWARD_WEIGHTS=(0.3 0.7)
 
 # Optional logging targets (can also be supplied via environment variables, e.g. SWIFT_REPORT_TO=swanlab)
 REPORT_TO="${SWIFT_REPORT_TO:-}"
