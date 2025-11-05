@@ -1,5 +1,6 @@
 # src/backends/hf_infer.py
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 import re, json, math
 from typing import List, Dict, Any, Tuple
 import torch
