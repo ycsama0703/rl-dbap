@@ -52,8 +52,8 @@ def load_teacher(teacher_base: str, lora_path: Optional[str]):
     if lora_path:
         lora_path = Path(lora_path)
         tmp_dir = Path(tempfile.mkdtemp(prefix="gkd_lora_"))
-        for src in lora_path.rglob('*'):
-            if src.is_dir() or '.ipynb_checkpoints' in src.parts:
+        for src in lora_path.rglob("*"):
+            if src.is_dir() or ".ipynb_checkpoints" in src.parts:
                 continue
             dest = tmp_dir / src.relative_to(lora_path)
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -72,9 +72,9 @@ def load_teacher(teacher_base: str, lora_path: Optional[str]):
 def main() -> None:
     args = parse_args()
 
-    train_dataset = load_dataset("json", data_files=f"{args.data_dir}/train.jsonl")['train']
-    eval_dataset = load_dataset("json", data_files=f"{args.data_dir}/eval.jsonl")['train']
-    test_dataset = load_dataset("json", data_files=f"{args.data_dir}/test.jsonl")['train']
+    train_dataset = load_dataset("json", data_files=f"{args.data_dir}/train.jsonl")["train"]
+    eval_dataset = load_dataset("json", data_files=f"{args.data_dir}/eval.jsonl")["train"]
+    test_dataset = load_dataset("json", data_files=f"{args.data_dir}/test.jsonl")["train"]
 
     tokenizer = AutoTokenizer.from_pretrained(args.student, trust_remote_code=True)
     if tokenizer.pad_token_id is None:
@@ -107,8 +107,9 @@ def main() -> None:
     trainer = GKDTrainer(
         model=student_model,
         teacher_model=teacher_model,
-        args=training_args,
+        tokenizer=tokenizer,
         processing_class=tokenizer,
+        args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
     )
