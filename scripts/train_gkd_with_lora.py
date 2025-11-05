@@ -1,5 +1,9 @@
 import argparse
+from pathlib import Path
 from typing import Optional
+import json
+import shutil
+import tempfile
 
 from datasets import load_dataset
 from peft import PeftModel
@@ -59,8 +63,21 @@ def load_teacher(teacher_base: str, lora_path: Optional[str]):
         trust_remote_code=True,
     )
     if lora_path:
-        teacher_model = PeftModel.from_pretrained(teacher_model, lora_path)
+        lora_path = Path(lora_path)
+        tmp_dir = Path(tempfile.mkdtemp(prefix="gkd_lora_"))
+        for src in lora_path.iterdir():
+            dest = tmp_dir / src.name
+            if src.name == "adapter_config.json":
+                with src.open("r", encoding="utf-8") as f:
+                    config = json.load(f)
+                config.pop("corda_config", None)
+                with dest.open("w", encoding="utf-8") as f:
+                    json.dump(config, f, ensure_ascii=False, indent=2)
+            else:
+                shutil.copy2(src, dest)
+        teacher_model = PeftModel.from_pretrained(teacher_model, str(tmp_dir))
         teacher_model = teacher_model.merge_and_unload()
+        shutil.rmtree(tmp_dir, ignore_errors=True)
     return teacher_model
 
 
