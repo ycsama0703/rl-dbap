@@ -17,8 +17,52 @@ import pandas as pd
 from src.evaluation.metrics import basic_regression, topk
 
 
-def compute_metrics(path: Path, out_csv: Optional[Path] = None) -> pd.DataFrame:
+def _trim_by_quantile(df: pd.DataFrame, value_col: str, quantile: float) -> pd.DataFrame:
+    if quantile is None or value_col not in df.columns:
+        return df
+    if not (0.0 < quantile <= 1.0):
+        raise ValueError(f"error quantile must be in (0,1], got {quantile}")
+    series = pd.to_numeric(df[value_col], errors="coerce").dropna()
+    if series.empty:
+        return df
+    threshold = series.quantile(quantile)
+    return df[df[value_col] <= threshold].copy()
+
+
+def _apply_substring_filter(
+    df: pd.DataFrame,
+    column: str,
+    substring: Optional[str],
+    case_sensitive: bool,
+) -> tuple[pd.DataFrame, float]:
+    original_total = len(df)
+    if not substring or not column or column not in df.columns:
+        coverage = 100.0 if original_total else np.nan
+        return df.copy(), coverage
+    series = df[column].astype(str)
+    mask = series.str.contains(substring, case=case_sensitive, na=False)
+    filtered = df[mask].copy()
+    coverage = 100.0 * len(filtered) / original_total if original_total else np.nan
+    return filtered, coverage
+
+
+def compute_metrics(
+    path: Path,
+    out_csv: Optional[Path] = None,
+    error_quantile: Optional[float] = None,
+    filter_column: str = "raw_output",
+    filter_substring: Optional[str] = "holding_log_delta",
+    filter_case_sensitive: bool = False,
+) -> pd.DataFrame:
     df = pd.read_csv(path)
+
+    filtered_df, filter_coverage = _apply_substring_filter(
+        df,
+        filter_column,
+        filter_substring,
+        filter_case_sensitive,
+    )
+    df = filtered_df
 
     # normalise column names
     if "parsed_pred" not in df.columns or "y_true" not in df.columns:
@@ -38,7 +82,11 @@ def compute_metrics(path: Path, out_csv: Optional[Path] = None) -> pd.DataFrame:
 
     total = len(df)
     valid = df[df["y_pred"].notna()].copy()
-    coverage = 100.0 * len(valid) / total if total else np.nan
+    valid_coverage = 100.0 * len(valid) / total if total else np.nan
+
+    valid["abs_error"] = (valid["y_pred"] - valid["y_true"]).abs()
+    if error_quantile is not None:
+        valid = _trim_by_quantile(valid, "abs_error", error_quantile)
 
     valid = valid.set_index("id", drop=False) if "id" in valid.columns else valid
 
@@ -51,6 +99,9 @@ def compute_metrics(path: Path, out_csv: Optional[Path] = None) -> pd.DataFrame:
     else:
         valid_abs = pd.DataFrame()
     if has_tp1_cols and not valid_abs.empty:
+        valid_abs["abs_tp1_error"] = (valid_abs["pred_tp1"] - valid_abs["true_tp1"]).abs()
+        if error_quantile is not None:
+            valid_abs = _trim_by_quantile(valid_abs, "abs_tp1_error", error_quantile)
         subset_cols = ["true_tp1", "pred_tp1", "quarter"]
         if "id" in valid_abs.columns:
             subset_cols.append("id")
@@ -66,7 +117,8 @@ def compute_metrics(path: Path, out_csv: Optional[Path] = None) -> pd.DataFrame:
     metrics_df = pd.DataFrame(
         [
             {
-                "coverage%": coverage,
+                "coverage_filtered%": filter_coverage,
+                "coverage_valid%": valid_coverage,
                 "MAE_log": mae_log,
                 "RMSE_log": rmse_log,
                 "R2_log": r2_log,
@@ -100,9 +152,38 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Compute metrics from debug_eval_outputs CSV.")
     ap.add_argument("--debug-csv", required=True, help="Path to CSV produced by debug_eval_outputs.py")
     ap.add_argument("--out-csv", help="Optional path to write metrics CSV")
+    ap.add_argument(
+        "--error-quantile",
+        type=float,
+        default=None,
+        help="Optional upper quantile threshold for absolute errors (e.g., 0.99 keeps the lowest 99%%).",
+    )
+    ap.add_argument(
+        "--filter-column",
+        default="raw_output",
+        help="Column to apply substring filtering on before computing metrics (default: raw_output).",
+    )
+    ap.add_argument(
+        "--filter-substring",
+        default="holding_log_delta",
+        help="Substring that must appear in the filter column to keep a row (set to '' to disable).",
+    )
+    ap.add_argument(
+        "--filter-case-sensitive",
+        action="store_true",
+        help="Make the substring filter case-sensitive.",
+    )
     args = ap.parse_args()
 
-    metrics = compute_metrics(Path(args.debug_csv), Path(args.out_csv) if args.out_csv else None)
+    substring = args.filter_substring if args.filter_substring else None
+    metrics = compute_metrics(
+        Path(args.debug_csv),
+        Path(args.out_csv) if args.out_csv else None,
+        error_quantile=args.error_quantile,
+        filter_column=args.filter_column,
+        filter_substring=substring,
+        filter_case_sensitive=args.filter_case_sensitive,
+    )
     print(metrics.to_string(index=False))
 
 

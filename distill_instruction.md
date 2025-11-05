@@ -223,19 +223,145 @@ bash run_qwen_kd.sh
 
 ---
 
-## 📈 6. 模型评估
+## 📈 6. 模型评估与调试
+
+### 6.1 构建 Chat 评测集
+`debug_eval_outputs.py` 要求输入为 chat 格式。若手上只有 prompt/teacher 输出，可先拼成 `messages` 结构：
 
 ```bash
-python eval_model.py \
-  --model_path ./output/student_kd \
-  --data_path data/val.json \
-  --metrics bleu rouge ppl
+PYTHONPATH=/workspace/rl-dbap python - <<'PY'
+import json
+from pathlib import Path
+
+root = Path("artifacts/distill_data")
+prompt_path = root / "raw" / "test_prompts_banks.jsonl"
+teacher_path = root / "raw" / "teacher_outputs_banks.jsonl"
+out_path = root / "processed" / "test_banks_chat.jsonl"
+
+prompts = {}
+with prompt_path.open() as f:
+    for line in f:
+        rec = json.loads(line)
+        prompts[rec["id"]] = rec
+
+rows = []
+with teacher_path.open() as f:
+    for line in f:
+        rec = json.loads(line)
+        prompt = prompts.get(rec["id"])
+        if not prompt:
+            continue
+        system = prompt.get("system", "")
+        user = prompt.get("prompt", "")
+        raw = (rec.get("raw_output") or "").strip()
+        think = (rec.get("think") or "").strip()
+        answer = (rec.get("answer") or raw).strip()
+        assistant_msgs = []
+        if think:
+            if not think.lower().startswith("<think>"):
+                think = f"<think>{think}</think>"
+            assistant_msgs.append({"role": "assistant", "content": think, "loss": False})
+        if not answer.lower().startswith("<answer>"):
+            answer = f"<answer>{answer}</answer>"
+        assistant_msgs.append({"role": "assistant", "content": answer, "loss": True})
+        rows.append({
+            "id": rec["id"],
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+                *assistant_msgs,
+            ],
+        })
+
+out_path.parent.mkdir(parents=True, exist_ok=True)
+with out_path.open("w", encoding="utf-8") as f:
+    for row in rows:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+print(f"[ok] wrote {len(rows)} rows -> {out_path}")
+PY
 ```
 
-或使用 nlg-eval:
+为其它类别替换相应的 `test_prompts_*.jsonl` 与 `teacher_outputs_*.jsonl` 即可。
+
+### 6.2 跑推理（Student / Baseline / Teacher）
+
+以下命令默认在 `/workspace/rl-dbap` 目录执行，可按需调整 batch size：
+
 ```bash
-nlg-eval --hypothesis=student_output.txt --references=ref.txt
+# Student (蒸馏后模型)
+PYTHONPATH=/workspace/rl-dbap python scripts/debug_eval_outputs.py \
+  --test-path artifacts/distill_data/processed/test_banks_chat.jsonl \
+  --base-model /workspace/rl-dbap/outputs/student_seqkd_1p5b/best_tfmr \
+  --out-csv outputs/debug_eval_student_seqkd.csv \
+  --batch-size 4 --max-new-tokens 128 --torch-dtype bfloat16
+
+# Qwen2.5-1.5B 原始基座
+PYTHONPATH=/workspace/rl-dbap python scripts/debug_eval_outputs.py \
+  --test-path artifacts/distill_data/processed/test_banks_chat.jsonl \
+  --base-model /workspace/models/Qwen2.5-1.5B-Instruct \
+  --out-csv outputs/debug_eval_qwen15b_base.csv \
+  --batch-size 4 --max-new-tokens 128 --torch-dtype bfloat16
+
+# Qwen2.5-7B 基座（参考上限）
+PYTHONPATH=/workspace/rl-dbap python scripts/debug_eval_outputs.py \
+  --test-path artifacts/distill_data/processed/test_banks_chat.jsonl \
+  --base-model /workspace/models/Qwen2.5-7B-Instruct \
+  --out-csv outputs/debug_eval_qwen7b_base.csv \
+  --batch-size 2 --max-new-tokens 128 --torch-dtype bfloat16
+
+# GRPO Teacher（LoRA 形式）
+PYTHONPATH=/workspace/rl-dbap python scripts/debug_eval_outputs.py \
+  --test-path artifacts/distill_data/processed/test_banks_chat.jsonl \
+  --base-model /workspace/models/Qwen2.5-7B-Instruct \
+  --lora-path /workspace/rl-dbap/outputs/grpo_banks_qwen2p5/v3-20251103-130248/checkpoint-500 \
+  --out-csv outputs/debug_eval_grpo_qwen7b.csv \
+  --batch-size 2 --max-new-tokens 128 --torch-dtype bfloat16
 ```
+
+可加上 `--limit 50` 快速 sanity check，再移除跑全量。
+
+### 6.3 过滤不合规样本（推荐）
+为了避免非 JSON 输出扰动指标，**先过滤掉未包含 `holding_log_delta` 的样本**。脚本会同时打印保留下来的样本占比，这个比例可作为“合规覆盖率”对比不同模型输出质量：
+
+```bash
+PYTHONPATH=/workspace/rl-dbap python - <<'PY'
+import pandas as pd
+from pathlib import Path
+for name in ["student_seqkd", "qwen15b_base", "qwen7b_base", "grpo_qwen7b"]:
+    path = Path(f"outputs/debug_eval_{name}.csv")
+    if not path.exists():
+        continue
+    df = pd.read_csv(path)
+    filt = df["raw_output"].astype(str).str.contains("holding_log_delta", case=False, na=False)
+    out = path.with_name(path.stem + "_filtered.csv")
+    df[filt].to_csv(out, index=False)
+    print(f"[{name}] coverage = {filt.mean():.4f} ({filt.sum()}/{len(df)} rows) -> {out}")
+PY
+```
+
+### 6.4 计算评测指标
+
+`compute_metrics_from_debug.py` 会产出与 `run_eval` 一致的指标。可使用分位数裁剪避免极端误差：
+
+```bash
+PYTHONPATH=/workspace/rl-dbap python scripts/compute_metrics_from_debug.py \
+  --debug-csv outputs/debug_eval_student_seqkd_filtered.csv \
+  --out-csv outputs/metrics_student_seqkd_q95.csv \
+  --error-quantile 0.95 \
+  --filter-substring holding_log_delta
+
+PYTHONPATH=/workspace/rl-dbap python scripts/compute_metrics_from_debug.py \
+  --debug-csv outputs/debug_eval_qwen15b_base_filtered.csv \
+  --out-csv outputs/metrics_qwen15b_base_q95.csv \
+  --error-quantile 0.95 \
+  --filter-substring holding_log_delta
+
+# 7B & GRPO Teacher 同理
+```
+
+若需完整统计，移除 `--error-quantile` 即可。输出表中的
+`coverage_filtered%`（过滤后占比）与 `coverage_valid%`（在过滤结果上成功解析出的比例）可直接作为模型合规输出能力的量化指标。`--filter-substring` 默认已为 `holding_log_delta`，如需关闭过滤可传 `--filter-substring ''`。
 
 ---
 

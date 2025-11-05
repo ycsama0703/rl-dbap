@@ -1,16 +1,35 @@
 # src/backends/hf_infer.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-import re, json, math
-from typing import List, Dict, Any, Tuple
+import re, json, math, inspect
+from typing import List, Dict, Any, Tuple, Dict as TypingDict
+from pathlib import Path
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
+try:
+    from peft import PeftConfig  # type: ignore
+except ImportError:  # pragma: no cover
+    PeftConfig = None  # type: ignore
+try:
+    from peft import LoraConfig  # type: ignore
+except ImportError:  # pragma: no cover
+    try:
+        from peft.tuners.lora import LoraConfig  # type: ignore
+    except ImportError:  # pragma: no cover
+        LoraConfig = None  # type: ignore
 
 _JSON_RE = re.compile(r'\{.*?\}', re.S)
 _FLOAT_RE = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?')
 _HOLDING_T_PATTERN = re.compile(r'holding\s*=\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)', re.IGNORECASE)
 LOG_EPS = 1e-6
+_LORA_ALLOWED_KEYS: set[str] = set()
+if LoraConfig is not None:  # pragma: no branch
+    try:
+        sig = inspect.signature(LoraConfig.__init__)  # type: ignore[attr-defined]
+        _LORA_ALLOWED_KEYS = {k for k in sig.parameters.keys() if k != "self"}
+    except (ValueError, TypeError):
+        _LORA_ALLOWED_KEYS = set()
 
 
 def load_samples(fp: str):
@@ -84,7 +103,43 @@ def load_model_and_tokenizer(base_model: str, lora_path: str|None, torch_dtype="
     tok = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
     mdl = AutoModelForCausalLM.from_pretrained(base_model, torch_dtype=dtype, device_map="auto", trust_remote_code=True)
     if lora_path and lora_path.lower()!="none":
-        mdl = PeftModel.from_pretrained(mdl, lora_path)
+        peft_kwargs: Dict[str, Any] = {}
+        adapter_path = Path(lora_path)
+        adapter_cfg_path = adapter_path / "adapter_config.json"
+        raw_cfg: TypingDict[str, Any] | None = None
+        if adapter_cfg_path.exists():
+            try:
+                text = adapter_cfg_path.read_text()
+                try:
+                    raw_cfg = json.loads(text)
+                except json.JSONDecodeError:
+                    try:
+                        text = text.strip()
+                        text = re.sub(r"[,\\s]*\\}$", "}", text)
+                        text = text.replace("null", "null")
+                        raw_cfg = json.loads(text)
+                    except json.JSONDecodeError:
+                        try:
+                            raw_cfg = json.loads(text.replace("\\n", "").replace(",}", "}"))
+                        except json.JSONDecodeError:
+                            raw_cfg = None
+            except Exception:
+                raw_cfg = None
+        if raw_cfg and LoraConfig is not None:
+            cfg_dict: Dict[str, Any] = dict(raw_cfg)
+            cfg_dict.pop("corda_config", None)
+            cfg_dict.pop("loftq_config", None)
+            cfg_dict.pop("eva_config", None)
+            cfg_dict.pop("adapter_mapping", None)
+            cfg_dict.pop("qalora_group_size", None)
+            allowed = _LORA_ALLOWED_KEYS or set(cfg_dict.keys())
+            cfg_dict = {k: v for k, v in cfg_dict.items() if k in allowed}
+            if cfg_dict.get("peft_type", "").lower() not in ("lora", ""):
+                cfg_dict.pop("peft_type", None)
+            if "task_type" in cfg_dict and isinstance(cfg_dict["task_type"], str):
+                cfg_dict["task_type"] = cfg_dict["task_type"].upper()
+            peft_kwargs["config"] = LoraConfig(**cfg_dict)
+        mdl = PeftModel.from_pretrained(mdl, lora_path, **peft_kwargs)
         try: mdl = mdl.merge_and_unload()
         except Exception: pass
     return tok, mdl
