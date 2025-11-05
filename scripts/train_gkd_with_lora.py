@@ -76,7 +76,7 @@ def main() -> None:
     eval_dataset = load_dataset("json", data_files=f"{args.data_dir}/eval.jsonl")["train"]
     test_dataset = load_dataset("json", data_files=f"{args.data_dir}/test.jsonl")["train"]
 
-    tokenizer = AutoTokenizer.from_pretrained(args.student, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.teacher_base, trust_remote_code=True)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
@@ -86,8 +86,12 @@ def main() -> None:
         device_map="auto",
         trust_remote_code=True,
     )
+    if student_model.config.vocab_size != len(tokenizer):
+        student_model.resize_token_embeddings(len(tokenizer))
 
     teacher_model = load_teacher(args.teacher_base, args.teacher_lora)
+    if teacher_model.config.vocab_size != len(tokenizer):
+        teacher_model.resize_token_embeddings(len(tokenizer))
 
     training_args = GKDConfig(
         output_dir=args.output_dir,
