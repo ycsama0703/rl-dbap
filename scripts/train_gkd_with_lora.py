@@ -108,7 +108,6 @@ def main() -> None:
         model=student_model,
         teacher_model=teacher_model,
         tokenizer=tokenizer,
-        processing_class=tokenizer,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
