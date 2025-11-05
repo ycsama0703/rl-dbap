@@ -321,8 +321,8 @@ PYTHONPATH=/workspace/rl-dbap python scripts/debug_eval_outputs.py \
 
 可加上 `--limit 50` 快速 sanity check，再移除跑全量。
 
-### 6.3 过滤不合规样本（推荐）
-为了避免非 JSON 输出扰动指标，**先过滤掉未包含 `holding_log_delta` 的样本**。脚本会同时打印保留下来的样本占比，这个比例可作为“合规覆盖率”对比不同模型输出质量：
+### 6.3 过滤不合规样本（可选）
+`compute_metrics_from_debug.py` 已内置过滤逻辑；若想提前生成过滤后的 CSV 以便人工排查，可运行：
 
 ```bash
 PYTHONPATH=/workspace/rl-dbap python - <<'PY'
@@ -342,26 +342,30 @@ PY
 
 ### 6.4 计算评测指标
 
-`compute_metrics_from_debug.py` 会产出与 `run_eval` 一致的指标。可使用分位数裁剪避免极端误差：
+[`scripts/compute_metrics_from_debug.py`](scripts/compute_metrics_from_debug.py) 在内部会先过滤掉 `raw_output` 中未包含 `holding_log_delta` 的样本，再计算与 `run_eval` 一致的指标。推荐对四套模型统一按 99% 分位裁剪误差：
 
 ```bash
-PYTHONPATH=/workspace/rl-dbap python scripts/compute_metrics_from_debug.py \
-  --debug-csv outputs/debug_eval_student_seqkd_filtered.csv \
-  --out-csv outputs/metrics_student_seqkd_q95.csv \
-  --error-quantile 0.95 \
-  --filter-substring holding_log_delta
+export PYTHONPATH=/workspace/rl-dbap
 
-PYTHONPATH=/workspace/rl-dbap python scripts/compute_metrics_from_debug.py \
-  --debug-csv outputs/debug_eval_qwen15b_base_filtered.csv \
-  --out-csv outputs/metrics_qwen15b_base_q95.csv \
-  --error-quantile 0.95 \
-  --filter-substring holding_log_delta
-
-# 7B & GRPO Teacher 同理
+for name in student_seqkd qwen15b_base qwen7b_base grpo_qwen7b; do
+  python scripts/compute_metrics_from_debug.py \
+    --debug-csv /workspace/rl-dbap/outputs/debug_eval_${name}.csv \
+    --out-csv   /workspace/rl-dbap/outputs/metrics_${name}_q99.csv \
+    --error-quantile 0.99
+done
 ```
 
-若需完整统计，移除 `--error-quantile` 即可。输出表中的
-`coverage_filtered%`（过滤后占比）与 `coverage_valid%`（在过滤结果上成功解析出的比例）可直接作为模型合规输出能力的量化指标。`--filter-substring` 默认已为 `holding_log_delta`，如需关闭过滤可传 `--filter-substring ''`。
+若想查看“全样本”表现，可省略 `--error-quantile` 并另存一份，例如 `metrics_${name}_full.csv`。如需完全关闭过滤，可显式传入 `--filter-substring ''`。
+
+### 6.5 指标解读建议
+
+- **coverage_filtered%**：过滤后仍保留的样本比例，可视作模型遵守输出合同的合规率。  
+- **coverage_valid%**：在过滤结果上能成功解析为数字的占比。  
+- **MAE/RMSE（log & tp1）**：用于衡量误差水平，推荐对比 `metrics_*_q99.csv` 结果。  
+- **IC / RankIC / Top‑K**：衡量排序相关性与投资决策指标，需结合误差一起观察。  
+- **全样本 vs. 分位裁剪**：全样本统计有助于发现极端异常（未合规、误解析等），而 0.99 分位提供相对稳健的模型对比。
+
+实践中，GRPO Teacher 与 Student（蒸馏模型）在合规覆盖率与误差上最接近；原始 7B 基座次之；1.5B 基座在未对齐情况下合规率与误差都会明显劣化。
 
 ---
 
