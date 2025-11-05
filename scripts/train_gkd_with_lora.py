@@ -2,11 +2,13 @@ import argparse
 import json
 import shutil
 import tempfile
+from inspect import signature
 from pathlib import Path
 from typing import Optional
 
 from datasets import load_dataset
 from peft import PeftModel
+from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import GKDConfig, GKDTrainer
 
@@ -30,6 +32,16 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _sanitize_lora_config(config: dict) -> dict:
+    peft_type = config.get("peft_type", "LORA")
+    if isinstance(peft_type, str):
+        peft_type = peft_type.upper()
+    config_cls = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type]
+    params = signature(config_cls.__init__).parameters
+    allowed = set(params.keys()) - {"self"}
+    return {k: v for k, v in config.items() if k in allowed}
+
+
 def load_teacher(teacher_base: str, lora_path: Optional[str]):
     teacher_model = AutoModelForCausalLM.from_pretrained(
         teacher_base,
@@ -47,7 +59,7 @@ def load_teacher(teacher_base: str, lora_path: Optional[str]):
             dest.parent.mkdir(parents=True, exist_ok=True)
             if src.name == "adapter_config.json":
                 config = json.loads(src.read_text())
-                config.pop("corda_config", None)
+                config = _sanitize_lora_config(config)
                 dest.write_text(json.dumps(config, ensure_ascii=False, indent=2))
             else:
                 shutil.copy2(src, dest)
