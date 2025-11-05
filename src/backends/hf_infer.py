@@ -77,25 +77,38 @@ def extract_y_true(assistant_content: str):
 
 
 def extract_pred(text: str) -> float | None:
-    """Extract predicted holding_log_delta from model completion."""
+    """Extract predicted holding_log_delta from model completion (robust version)."""
+    if not isinstance(text, str) or len(text.strip()) == 0:
+        return None
+
+    # ---------- 优先：解析 JSON ----------
     m = _JSON_RE.search(text or "")
     if m:
         try:
             obj = json.loads(m.group(0))
             if obj.get("holding_log_delta") is not None:
                 val = float(obj["holding_log_delta"])
-                if math.isfinite(val):
+                if math.isfinite(val) and -10 < val < 10:
                     return val
         except Exception:
             pass
-    m2 = _FLOAT_RE.search(text or "")
-    if not m2:
-        return None
-    try:
-        val = float(m2.group(0))
-        return val if math.isfinite(val) else None
-    except Exception:
-        return None
+
+    # ---------- 其次：仅在 <answer> 段中提取 ----------
+    answer_block = re.search(r"<answer>(.*?)</answer>", text, re.DOTALL)
+    if answer_block:
+        content = answer_block.group(1)
+        m2 = _FLOAT_RE.search(content or "")
+        if m2:
+            try:
+                val = float(m2.group(0))
+                if math.isfinite(val) and -10 < val < 10:
+                    return val
+            except Exception:
+                pass
+
+    # ---------- fallback：返回 None ----------
+    return None
+
 
 
 def load_model_and_tokenizer(base_model: str, lora_path: str|None, torch_dtype="bfloat16"):

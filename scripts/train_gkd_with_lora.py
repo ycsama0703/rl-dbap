@@ -42,12 +42,21 @@ def _sanitize_lora_config(config: dict) -> dict:
     return {k: v for k, v in config.items() if k in allowed}
 
 
+def resolve_path(path_str: str) -> str:
+    path = Path(path_str)
+    if path.exists():
+        return str(path)
+    return path_str
+
+
 def load_teacher(teacher_base: str, lora_path: Optional[str]):
+    teacher_base = resolve_path(teacher_base)
     teacher_model = AutoModelForCausalLM.from_pretrained(
         teacher_base,
         torch_dtype="auto",
         device_map="auto",
         trust_remote_code=True,
+        local_files_only=Path(teacher_base).exists(),
     )
     if lora_path:
         lora_path = Path(lora_path)
@@ -72,29 +81,40 @@ def load_teacher(teacher_base: str, lora_path: Optional[str]):
 def main() -> None:
     args = parse_args()
 
-    train_dataset = load_dataset("json", data_files=f"{args.data_dir}/train.jsonl")["train"]
-    eval_dataset = load_dataset("json", data_files=f"{args.data_dir}/eval.jsonl")["train"]
-    test_dataset = load_dataset("json", data_files=f"{args.data_dir}/test.jsonl")["train"]
+    data_dir = resolve_path(args.data_dir)
+    output_dir = resolve_path(args.output_dir)
+    student_path = resolve_path(args.student)
+    teacher_base_path = resolve_path(args.teacher_base)
+    teacher_lora_path = resolve_path(args.teacher_lora) if args.teacher_lora else None
 
-    tokenizer = AutoTokenizer.from_pretrained(args.teacher_base, trust_remote_code=True)
+    train_dataset = load_dataset("json", data_files=f"{data_dir}/train.jsonl")["train"]
+    eval_dataset = load_dataset("json", data_files=f"{data_dir}/eval.jsonl")["train"]
+    test_dataset = load_dataset("json", data_files=f"{data_dir}/test.jsonl")["train"]
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        teacher_base_path,
+        trust_remote_code=True,
+        local_files_only=Path(teacher_base_path).exists(),
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     student_model = AutoModelForCausalLM.from_pretrained(
-        args.student,
+        student_path,
         torch_dtype="auto",
         device_map="auto",
         trust_remote_code=True,
+        local_files_only=Path(student_path).exists(),
     )
     if student_model.config.vocab_size != len(tokenizer):
         student_model.resize_token_embeddings(len(tokenizer))
 
-    teacher_model = load_teacher(args.teacher_base, args.teacher_lora)
+    teacher_model = load_teacher(teacher_base_path, teacher_lora_path)
     if teacher_model.config.vocab_size != len(tokenizer):
         teacher_model.resize_token_embeddings(len(tokenizer))
 
     training_args = GKDConfig(
-        output_dir=args.output_dir,
+        output_dir=output_dir,
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
@@ -107,6 +127,7 @@ def main() -> None:
         remove_unused_columns=False,
         report_to=[],
     )
+    training_args.max_grad_norm = 0.0
 
     trainer = GKDTrainer(
         model=student_model,
@@ -119,7 +140,7 @@ def main() -> None:
 
     trainer.train()
     trainer.save_model()
-    tokenizer.save_pretrained(args.output_dir)
+    tokenizer.save_pretrained(output_dir)
 
     print("Evaluate on test set")
     print(trainer.evaluate(test_dataset))
