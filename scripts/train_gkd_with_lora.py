@@ -1,9 +1,9 @@
 import argparse
-from pathlib import Path
-from typing import Optional
 import json
 import shutil
 import tempfile
+from pathlib import Path
+from typing import Optional
 
 from datasets import load_dataset
 from peft import PeftModel
@@ -13,36 +13,11 @@ from trl import GKDConfig, GKDTrainer
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run GKD distillation with optional LoRA teacher")
-    parser.add_argument(
-        "--data-dir",
-        type=str,
-        required=True,
-        help="Directory containing train.jsonl / eval.jsonl / test.jsonl",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        required=True,
-        help="Directory to store distilled model and tokenizer",
-    )
-    parser.add_argument(
-        "--student",
-        type=str,
-        required=True,
-        help="Path or identifier of the student base model",
-    )
-    parser.add_argument(
-        "--teacher-base",
-        type=str,
-        required=True,
-        help="Path or identifier of the teacher base model",
-    )
-    parser.add_argument(
-        "--teacher-lora",
-        type=str,
-        default=None,
-        help="Optional path to teacher LoRA checkpoint (adapter config + weights)",
-    )
+    parser.add_argument("--data-dir", type=str, required=True)
+    parser.add_argument("--output-dir", type=str, required=True)
+    parser.add_argument("--student", type=str, required=True)
+    parser.add_argument("--teacher-base", type=str, required=True)
+    parser.add_argument("--teacher-lora", type=str, default=None)
     parser.add_argument("--per-device-train-batch-size", type=int, default=1)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=5e-5)
@@ -65,14 +40,15 @@ def load_teacher(teacher_base: str, lora_path: Optional[str]):
     if lora_path:
         lora_path = Path(lora_path)
         tmp_dir = Path(tempfile.mkdtemp(prefix="gkd_lora_"))
-        for src in lora_path.iterdir():
-            dest = tmp_dir / src.name
+        for src in lora_path.rglob('*'):
+            if src.is_dir() or '.ipynb_checkpoints' in src.parts:
+                continue
+            dest = tmp_dir / src.relative_to(lora_path)
+            dest.parent.mkdir(parents=True, exist_ok=True)
             if src.name == "adapter_config.json":
-                with src.open("r", encoding="utf-8") as f:
-                    config = json.load(f)
+                config = json.loads(src.read_text())
                 config.pop("corda_config", None)
-                with dest.open("w", encoding="utf-8") as f:
-                    json.dump(config, f, ensure_ascii=False, indent=2)
+                dest.write_text(json.dumps(config, ensure_ascii=False, indent=2))
             else:
                 shutil.copy2(src, dest)
         teacher_model = PeftModel.from_pretrained(teacher_model, str(tmp_dir))
@@ -84,9 +60,9 @@ def load_teacher(teacher_base: str, lora_path: Optional[str]):
 def main() -> None:
     args = parse_args()
 
-    train_dataset = load_dataset("json", data_files=f"{args.data_dir}/train.jsonl")["train"]
-    eval_dataset = load_dataset("json", data_files=f"{args.data_dir}/eval.jsonl")["train"]
-    test_dataset = load_dataset("json", data_files=f"{args.data_dir}/test.jsonl")["train"]
+    train_dataset = load_dataset("json", data_files=f"{args.data_dir}/train.jsonl")['train']
+    eval_dataset = load_dataset("json", data_files=f"{args.data_dir}/eval.jsonl")['train']
+    test_dataset = load_dataset("json", data_files=f"{args.data_dir}/test.jsonl")['train']
 
     tokenizer = AutoTokenizer.from_pretrained(args.student, trust_remote_code=True)
     if tokenizer.pad_token_id is None:
