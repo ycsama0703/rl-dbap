@@ -3,6 +3,9 @@ import argparse, json
 from pathlib import Path
 from typing import Optional
 import pandas as pd
+from openai import OpenAI
+import os
+import re
 
 from src.cli.build_history_prompts import build_for_file
 from src.cli.prompts_to_sft import _build_auto_think
@@ -28,12 +31,14 @@ def _convert_prompts_to_sft(
     think_template: str = "",
     limit: Optional[int] = None,
 ) -> int:
-    from src.cli.prompts_to_sft import _resolve_absolute, _resolve_delta, _format_float
+    from src.cli.prompts_to_sft import _resolve_absolute, _resolve_log_delta as _resolve_delta, _format_float
+
 
     if contract_mode not in {"absolute", "delta"}:
         raise ValueError(f"unknown contract_mode={contract_mode}")
     resolver = _resolve_delta if contract_mode == "delta" else _resolve_absolute
-    answer_key = "holding_delta" if contract_mode == "delta" else "holding_tp1"
+    answer_key = "holding_log_delta" if contract_mode == "delta" else "holding_tp1"
+
 
     _ensure_dir(outp)
     n = 0
@@ -46,24 +51,66 @@ def _convert_prompts_to_sft(
             label_val = resolver(rec)
             if label_val is None:
                 continue
+
             value = _format_float(float(label_val), decimals)
-            resp = json.dumps({answer_key: value}, ensure_ascii=False)
+            resp_json = json.dumps({answer_key: value}, ensure_ascii=False)
             msgs = [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ]
             assistant_parts = []
+
             if with_think:
-                think_text = think_template.strip()
+                think_text = rec.get("think")
+
                 if not think_text:
-                    think_text = _build_auto_think(prompt, decimals)
+                    try:
+                        client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
+                        clean_prompt = re.split(r"OUTPUT FORMAT", prompt, maxsplit=1)[0].strip()
+                        ds_prompt = fds_prompt = f"""
+                            You are an experienced quantitative portfolio manager.
+
+                            Below are historical fundamental data and the actual change in holdings (the ground-truth label).
+                            Your task: Explain why this change is reasonable given the data.
+                            - Quantify the key metric shifts (me, be, profit, Gat, beta) from t-1 → t.
+                            - Explain their directional influence on holdings.
+                            - End with a short justification (no more than 4 sentences) that matches the true holding_log_delta direction.
+
+                            ---
+                            {clean_prompt}
+
+                            True label:
+                            holding_log_delta = {label_val:.4f}
+                            """
+                        resp_ds = client.chat.completions.create(
+                            model="deepseek-chat",
+                            messages=[
+                                {"role": "system", "content": "You are a financial reasoning assistant."},
+                                {"role": "user", "content": ds_prompt},
+                            ],
+                            temperature=0.7,
+                            max_tokens=200,
+                        )
+                        think_text = resp_ds.choices[0].message.content.strip()
+                        if not think_text.startswith("<think>"):
+                            think_text = f"<think>{think_text}</think>"
+                    except Exception as e:
+                        print(f"[WARN] DeepSeek generation failed: {e}")
+                        think_text = _build_auto_think(prompt, decimals)
+
                 if think_text:
                     think_lower = think_text.lower()
                     if not think_lower.startswith("<think>"):
                         think_text = f"<think>{think_text}</think>"
                     assistant_parts.append(think_text)
-            assistant_parts.append(f"<answer>{resp}</answer>")
-            msgs.append({"role": "assistant", "content": "\n".join(assistant_parts), "loss": True})
+
+            # ---------------- 拼接最终输出 ----------------
+            assistant_parts.append(f"<answer>{resp_json}</answer>")
+            msgs.append({
+                "role": "assistant",
+                "content": "\n".join(assistant_parts),
+                "loss": True,
+            })
             out = {"messages": msgs}
             fout.write(json.dumps(out, ensure_ascii=False) + "\n")
             n += 1
@@ -127,6 +174,10 @@ def main():
     ap.add_argument("--type", required=True, help="Firm type stem, e.g., 'banks'")
     ap.add_argument("--in-dir", type=str, default="data/processed/panel_quarter.parquet")
     ap.add_argument("--per-type-limit", type=int, default=1000)
+    ap.add_argument("--sft-limit", type=int, default=None)
+    ap.add_argument("--grpo-limit", type=int, default=None)
+    ap.add_argument("--test-limit", type=int, default=None)
+
     # date splits
     ap.add_argument("--sft-end", type=str, default="2016-12-31")
     ap.add_argument("--grpo-start", type=str, default="2017-01-01")
@@ -170,7 +221,9 @@ def main():
         print(f"[type-pipeline] mapping load failed: {e}")
 
     # outputs
-    ph_sft = Path("artifacts/prompts_hist_sft") / f"{t}.jsonl"
+    ph_sft_src = Path("artifacts/prompts_hist_sft") / f"{t}.jsonl"              # 构建原始 prompts 的输出（不带 think）
+    ph_sft_enriched = Path("artifacts/prompts_hist_sft_with_think") / f"{t}.jsonl"  # DeepSeek 富集后的输入（带 think）
+    #ph_sft = Path("artifacts/prompts_hist_sft_with_think") / f"{t}.jsonl"
     ph_grpo = Path("artifacts/prompts_hist_grpo") / f"{t}.jsonl"
     ph_test = Path("artifacts/prompts_hist_test") / f"{t}.jsonl"
     sft_out = Path("artifacts/sft") / f"sft_train_{t}.jsonl"
@@ -182,8 +235,8 @@ def main():
     print(f"[type-pipeline] building SFT prompts for {t} (<= {args.sft_end})")
     build_for_file(
         in_file=in_file,
-        out_file=ph_sft,
-        per_type_limit=args.per_type_limit,
+        out_file=ph_sft_src,
+        per_type_limit=args.sft_limit or args.per_type_limit,
         time_bins=10,
         cap_per_pair=3,
         seed=42,
@@ -200,7 +253,7 @@ def main():
     build_for_file(
         in_file=in_file,
         out_file=ph_grpo,
-        per_type_limit=args.per_type_limit,
+        per_type_limit=args.grpo_limit or args.per_type_limit,
         time_bins=10,
         cap_per_pair=3,
         seed=42,
@@ -217,7 +270,7 @@ def main():
     build_for_file(
         in_file=in_file,
         out_file=ph_test,
-        per_type_limit=args.per_type_limit,
+        per_type_limit=args.test_limit or args.per_type_limit,
         time_bins=10,
         cap_per_pair=3,
         seed=42,
@@ -231,9 +284,13 @@ def main():
     )
 
     # 2) Convert
-    print(f"[type-pipeline] convert SFT -> chat ({sft_out})")
+    # ✅ 永远使用原始 SFT prompts，DeepSeek 由本脚本自动生成
+    sft_input_for_convert = ph_sft_src
+    print(f"[type-pipeline] SFT convert input = {sft_input_for_convert} (DeepSeek integrated generation)")
+
+
     _convert_prompts_to_sft(
-        ph_sft,
+        sft_input_for_convert,
         sft_out,
         system="You are a quantitative portfolio manager.",
         with_think=args.sft_with_think,
@@ -241,6 +298,7 @@ def main():
         decimals=args.sft_decimals,
         think_template=args.sft_think_template,
     )
+
 
     print(f"[type-pipeline] convert TEST -> chat ({sft_test_out})")
     _convert_prompts_to_sft(
@@ -256,10 +314,18 @@ def main():
     _convert_prompts_to_grpo(ph_grpo, grpo_out, system="You are a quantitative portfolio manager.", no_think_example=args.grpo_no_think_example)
 
     # 3) Report stats
-    for fp, name in [(ph_sft, "prompts_sft"), (ph_grpo, "prompts_grpo"), (ph_test, "prompts_test")]:
+    stats_files = [
+        (ph_sft_src, "prompts_sft_raw"),
+        (ph_sft_enriched, "prompts_sft_with_think"),
+        (ph_grpo, "prompts_grpo"),
+        (ph_test, "prompts_test"),
+    ]
+
+    for fp, name in stats_files:
         if fp.exists():
             total, zeros = _count_zeros_in_prompts(fp)
             print(f"[type-pipeline] {name}: total={total} t==0={zeros} ratio={(zeros/total if total else 0):.3f}")
+
 
     print("[type-pipeline] done.")
 
