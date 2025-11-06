@@ -27,9 +27,9 @@ PER_DEVICE_TRAIN_BATCH_SIZE=4
 GRADIENT_ACCUM_STEPS=8
 LORA_RANK=32
 LORA_ALPHA=128
-# 默认使用格式 + MSE 奖励
-REWARD_FUNCS=(contract_holdings mse_holdings)
-REWARD_WEIGHTS=(0.3 0.7)
+# 默认使用 格式/数值/方向 奖励 (格式 5%，数值 75%，方向 20%)
+REWARD_FUNCS=(contract_holdings mse_holdings direction_holdings)
+REWARD_WEIGHTS=(0.05 0.75 0.20)
 
 # Optional logging targets (can also be supplied via environment variables, e.g. SWIFT_REPORT_TO=swanlab)
 REPORT_TO="${SWIFT_REPORT_TO:-}"
@@ -166,7 +166,7 @@ swift rlhf \
   --dataset "${DATASET}" \
   --load_from_cache_file true \
   --max_completion_length "${MAX_COMPLETION_LEN}" \
-  --num_train_epochs 1 \
+  --num_train_epochs 2 \
   --per_device_train_batch_size "${PER_DEVICE_TRAIN_BATCH_SIZE}" \
   --learning_rate 1e-6 \
   --gradient_accumulation_steps "${GRADIENT_ACCUM_STEPS}" \
