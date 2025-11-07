@@ -194,7 +194,13 @@ def infer_chat_batch(tokenizer, model, list_messages: List[List[Dict[str,str]]],
             if not prompt.endswith("<think>"):
                 prompt = f"{prompt}\n<think>"
         prompts.append(prompt)
-    inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True, max_length=2048).to(model.device)
+    inputs = tokenizer(
+        prompts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=4096,
+    ).to(model.device)
     out = model.generate(
         **inputs,
         do_sample=(temperature>0),
