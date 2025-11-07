@@ -16,20 +16,20 @@ set -euo pipefail
 MODEL="Qwen/Qwen2.5-7B-Instruct"
 DATASET="artifacts/grpo/grpo.jsonl"
 OUTPUT_DIR="outputs/grpo_qwen2.5_7b"
-NUM_GENERATIONS=8
+NUM_GENERATIONS=4
 MAX_COMPLETION_LEN=512
 USE_VLLM=0
 ADAPTERS=""
 RESUME_FROM=""
 TEMPERATURE=0.9
 STOP_WORDS=""
-PER_DEVICE_TRAIN_BATCH_SIZE=4
-GRADIENT_ACCUM_STEPS=8
+PER_DEVICE_TRAIN_BATCH_SIZE=2
+GRADIENT_ACCUM_STEPS=4
 LORA_RANK=32
 LORA_ALPHA=128
 # 默认使用 格式/数值/方向 奖励 (格式 5%，数值 75%，方向 20%)
-REWARD_FUNCS=(contract_holdings mse_holdings direction_holdings)
-REWARD_WEIGHTS=(0.05 0.75 0.20)
+REWARD_FUNCS=(contract_holdings huber_holdings direction_holdings)
+REWARD_WEIGHTS=(0.05 0.60 0.35)
 
 # Optional logging targets (can also be supplied via environment variables, e.g. SWIFT_REPORT_TO=swanlab)
 REPORT_TO="${SWIFT_REPORT_TO:-}"
@@ -166,7 +166,7 @@ swift rlhf \
   --dataset "${DATASET}" \
   --load_from_cache_file true \
   --max_completion_length "${MAX_COMPLETION_LEN}" \
-  --num_train_epochs 2 \
+  --num_train_epochs 1 \
   --per_device_train_batch_size "${PER_DEVICE_TRAIN_BATCH_SIZE}" \
   --learning_rate 1e-6 \
   --gradient_accumulation_steps "${GRADIENT_ACCUM_STEPS}" \

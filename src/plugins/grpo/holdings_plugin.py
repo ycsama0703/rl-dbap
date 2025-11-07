@@ -339,28 +339,29 @@ class MagnitudeHoldingsORM(ORM):
 orms["magnitude_holdings"] = MagnitudeHoldingsORM
 
 
-class MSEHoldingsORM(ORM):
-    """Reward based on squared error mapped linearly into [-1, 1]."""
+class HuberHoldingsORM(ORM):
+    """Reward based on Huber loss mapped linearly into [-1, 1]."""
 
     def __init__(self):
-        self._ema_mse: float | None = None
-        self._recent_mse: list[float] = []
+        self._ema_scale: float | None = None
+        self._recent_errors: list[float] = []
 
     def __call__(self, completions, label_delta=None, **kwargs) -> List[float]:
         if not isinstance(label_delta, list):
             label_delta = [label_delta] * len(completions)
 
-        base_cap = float(kwargs.get("mse_cap", 0.12))
+        delta = float(kwargs.get("delta", 0.05))
+        base_cap = float(kwargs.get("huber_cap", 0.12))
         base_cap = max(base_cap, 1e-8)
-        adaptive_mode = str(kwargs.get("adaptive_cap", "static")).lower()
+        adaptive_mode = str(kwargs.get("adaptive_cap", "ema")).lower()
         ema_lambda = float(kwargs.get("ema_lambda", 0.9))
-        cap_scale = float(kwargs.get("cap_scale", 1.5))
+        cap_scale = float(kwargs.get("cap_scale", 2.0))
         cap_floor = float(kwargs.get("cap_floor", base_cap))
         cap_percentile = float(kwargs.get("cap_percentile", 90.0))
         cap_window = int(kwargs.get("cap_window", 512))
 
         rewards: List[float] = []
-        mse_per_sample: list[float | None] = []
+        errs: list[float | None] = []
         for comp, tgt in zip(completions, label_delta):
             pred = None
             try:
@@ -376,39 +377,43 @@ class MSEHoldingsORM(ORM):
                 tgt_val = None
 
             if pred is None or tgt_val is None or not math.isfinite(pred) or not math.isfinite(tgt_val):
-                mse_per_sample.append(None)
+                errs.append(None)
                 continue
 
-            mse = (pred - tgt_val) ** 2
-            mse_per_sample.append(mse)
+            errs.append(pred - tgt_val)
 
-        valid_mses = [m for m in mse_per_sample if m is not None]
-        mse_cap = base_cap
-        if adaptive_mode == "ema" and valid_mses:
-            mean_mse = float(sum(valid_mses) / len(valid_mses))
-            if self._ema_mse is None:
-                self._ema_mse = mean_mse
+        valid_errs = [e for e in errs if e is not None]
+        huber_cap = base_cap
+        if adaptive_mode == "ema" and valid_errs:
+            mean_abs = float(sum(abs(e) for e in valid_errs) / len(valid_errs))
+            if self._ema_scale is None:
+                self._ema_scale = mean_abs
             else:
-                self._ema_mse = float(ema_lambda * self._ema_mse + (1 - ema_lambda) * mean_mse)
-            mse_cap = max(cap_floor, float(self._ema_mse) * cap_scale)
-        elif adaptive_mode == "percentile" and valid_mses:
-            self._recent_mse.extend(valid_mses)
-            if len(self._recent_mse) > cap_window:
-                self._recent_mse = self._recent_mse[-cap_window:]
-            if self._recent_mse:
-                mse_cap = max(cap_floor, float(np.percentile(self._recent_mse, cap_percentile)))
+                self._ema_scale = float(ema_lambda * self._ema_scale + (1 - ema_lambda) * mean_abs)
+            huber_cap = max(cap_floor, float(self._ema_scale) * cap_scale)
+        elif adaptive_mode == "percentile" and valid_errs:
+            self._recent_errors.extend(abs(e) for e in valid_errs)
+            if len(self._recent_errors) > cap_window:
+                self._recent_errors = self._recent_errors[-cap_window:]
+            if self._recent_errors:
+                huber_cap = max(cap_floor, float(np.percentile(self._recent_errors, cap_percentile)))
 
-        mse_cap = max(mse_cap, 1e-8)
+        huber_cap = max(huber_cap, 1e-8)
 
-        for mse in mse_per_sample:
-            if mse is None:
+        for e in errs:
+            if e is None:
                 rewards.append(-1.0)
                 continue
-            ratio = min(mse / mse_cap, 1.0)
+            ae = abs(e)
+            if ae <= delta:
+                huber = 0.5 * (e ** 2)
+            else:
+                huber = delta * (ae - 0.5 * delta)
+            ratio = min(huber / huber_cap, 1.0)
             rewards.append(1.0 - 2.0 * ratio)
 
         return rewards
 
 
-orms["mse_holdings"] = MSEHoldingsORM
+orms["huber_holdings"] = HuberHoldingsORM
 

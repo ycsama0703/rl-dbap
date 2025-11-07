@@ -52,6 +52,27 @@ def _trim_by_quantile(df: pd.DataFrame, value_col: str, quantile: float) -> pd.D
     return df[df[value_col] <= threshold].copy()
 
 
+def _direction_accuracy(
+    df: pd.DataFrame,
+    tolerance: float = 2e-2,
+    weighted: bool = True,
+    weight_cap: float = 0.2,
+) -> float:
+    valid = df.dropna(subset=["y_true", "y_pred"]).copy()
+    if tolerance > 0:
+        valid = valid[valid["y_true"].abs() >= tolerance]
+    if valid.empty:
+        return float("nan")
+    sign_match = np.sign(valid["y_true"]) == np.sign(valid["y_pred"])
+    if weighted:
+        weights = (valid["y_true"].abs() / max(weight_cap, 1e-8)).clip(0.0, 1.0)
+        weight_sum = weights.sum()
+        if weight_sum == 0:
+            return float("nan")
+        return float(100.0 * (weights * sign_match).sum() / weight_sum)
+    return float(100.0 * sign_match.mean())
+
+
 # ======== main compute ========
 def compute_metrics(
     path: Path,
@@ -87,6 +108,7 @@ def compute_metrics(
     # ---- Step 4. 计算指标 ----
     mae, rmse, r2, smape, ic, ric = basic_regression(valid)
     rec, pre, ndcg = topk(valid, "quarter", k=50)
+    dir_acc = _direction_accuracy(valid)
 
     metrics_df = pd.DataFrame(
         [
@@ -102,6 +124,7 @@ def compute_metrics(
                 "Recall@50_log": rec,
                 "Precision@50_log": pre,
                 "NDCG@50_log": ndcg,
+                "DirectionAcc%": dir_acc,
             }
         ]
     )
