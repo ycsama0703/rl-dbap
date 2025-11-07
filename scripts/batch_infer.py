@@ -23,6 +23,7 @@ from src.backends.hf_infer import (  # noqa: E402
     load_model_and_tokenizer,
     infer_chat_batch,
     extract_y_true,
+    parse_holding_t,
 )
 import numpy as np
 
@@ -91,7 +92,9 @@ def load_labels(labels_path: Path) -> Dict[int, float]:
             if not assistants:
                 continue
             target = next((m for m in assistants if m.get("loss") is True), assistants[-1])
-            y_true = extract_y_true(target.get("content", ""))
+            user_msg = next((m for m in msgs if m.get("role") == "user"), None)
+            holding_t = parse_holding_t(user_msg["content"]) if user_msg else None
+            y_true = extract_y_true(target.get("content", ""), holding_t)
             if y_true is not None:
                 label_map[idx] = y_true
     return label_map

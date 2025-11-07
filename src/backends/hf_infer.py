@@ -52,28 +52,54 @@ def parse_quarter_from_user(user_text: str) -> str:
     return f"{y}Q{q}"
 
 
-def extract_y_true(assistant_content: str):
-    """Extract ground-truth holding_log_delta from assistant message."""
-    if not assistant_content:
+def _parse_label_obj(text: str) -> Dict[str, Any] | None:
+    if not text:
         return None
     try:
-        obj = json.loads(assistant_content)
-        if "holding_log_delta" in obj:
-            val = float(obj["holding_log_delta"])
-            return val if math.isfinite(val) else None
+        return json.loads(text)
     except Exception:
-        pass
-    m = _JSON_RE.search(assistant_content)
-    if not m:
-        return None
-    try:
-        obj = json.loads(m.group(0))
+        m = _JSON_RE.search(text)
+        if not m:
+            return None
+        try:
+            return json.loads(m.group(0))
+        except Exception:
+            return None
+
+
+def extract_y_true(assistant_content: str, holding_t: float | None = None):
+    """Extract ground-truth holding_log_delta (with optional fallback to absolute targets)."""
+
+    def _to_log_delta(obj: Dict[str, Any]) -> float | None:
         if "holding_log_delta" in obj:
-            val = float(obj["holding_log_delta"])
-            return val if math.isfinite(val) else None
-    except Exception:
+            try:
+                val = float(obj["holding_log_delta"])
+                return val if math.isfinite(val) else None
+            except Exception:
+                return None
+        if holding_t is None:
+            return None
+        if "holding_delta" in obj:
+            try:
+                delta = float(obj["holding_delta"])
+                tp1 = float(holding_t) + delta
+                log_delta = math.log((tp1 + LOG_EPS) / (float(holding_t) + LOG_EPS))
+                return log_delta if math.isfinite(log_delta) else None
+            except Exception:
+                return None
+        if "holding_tp1" in obj:
+            try:
+                tp1 = float(obj["holding_tp1"])
+                log_delta = math.log((tp1 + LOG_EPS) / (float(holding_t) + LOG_EPS))
+                return log_delta if math.isfinite(log_delta) else None
+            except Exception:
+                return None
         return None
-    return None
+
+    obj = _parse_label_obj(assistant_content)
+    if obj is None:
+        return None
+    return _to_log_delta(obj)
 
 
 def extract_pred(text: str) -> float | None:
@@ -214,12 +240,13 @@ def build_eval_inputs(test_path: str) -> Tuple[List[List[Dict[str,str]]], List[f
             continue
         # pick the assistant message that has loss=True if present; otherwise pick the last assistant
         ast = next((m for m in assistants if m.get("loss") is True), assistants[-1])
-        yt = extract_y_true(ast.get("content", ""))
+        holding_val = parse_holding_t(usr["content"])
+        yt = extract_y_true(ast.get("content", ""), holding_val)
         if yt is None: continue
         chat_inputs.append([{"role":"system","content":sys["content"]},
                             {"role":"user","content":usr["content"]}])
         y_true.append(yt)
         quarter.append(parse_quarter_from_user(usr["content"]))
         ids.append(i)
-        holding_ts.append(parse_holding_t(usr["content"]))
+        holding_ts.append(holding_val)
     return chat_inputs, y_true, quarter, ids, holding_ts
