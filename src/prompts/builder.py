@@ -125,16 +125,10 @@ def build_history_prompt(
     if strict_contract:
         instructions = (
             "OUTPUT FORMAT & REASONING GUIDE\n\n"
-            "You MUST follow the exact output structure below.\n\n"
-            "1. Begin with a single reasoning block enclosed in <think>...</think>.\n"
-            "   - Purpose: explain numerically and briefly how the given fundamentals justify your final holding adjustment.\n"
-            "   - Keep it concise (<= 3 sentences, numeric precision 2 decimals).\n"
-            "   - Example style: <think>me↓ (-15%), profit↑ (+0.02) → moderate increase in holding.</think>\n\n"
-            "2. Immediately after </think>, output a single <answer>...</answer> block.\n"
-            "   - Inside <answer>, output exactly ONE valid JSON object:\n"
-            "     {\"holding_log_delta\": <float>}\n"
-            "   - The float must have 2 decimal places, no scientific notation.\n"
-            "   - Example: <answer>{\"holding_log_delta\": 0.31}</answer>\n\n"
+            "1. Begin with a single reasoning block enclosed in <think>...</think>. Keep concise (≤ 3 sentences).\n"
+            "2. Then output a single <answer>...</answer> block with exactly one JSON object: "
+            '{"holding_delta": <float>}.\n'
+            "3. The float must have 2 decimal places, no scientific notation.\n"
             "The final output should look EXACTLY like this example (structure only):\n\n"
             "<think>...</think>\n"
             "<answer>{\"holding_log_delta\": 0.00}</answer>\n\n"

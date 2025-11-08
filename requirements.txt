@@ -22,3 +22,6 @@ swanlab>=0.4.2
 # Extra deps required by ms-swift optional plugins (imported at load time)
 math_verify==0.5.2
 latex2sympy2-extended>=0.5.1
+
+msgspec
+math_verify==0.5.2
