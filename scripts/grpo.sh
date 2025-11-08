@@ -18,6 +18,7 @@ DATASET="artifacts/grpo/grpo.jsonl"
 OUTPUT_DIR="outputs/grpo_qwen2.5_7b"
 NUM_GENERATIONS=4
 MAX_COMPLETION_LEN=512
+NUM_TRAIN_EPOCHS=1
 USE_VLLM=0
 ADAPTERS=""
 RESUME_FROM=""
@@ -166,7 +167,7 @@ swift rlhf \
   --dataset "${DATASET}" \
   --load_from_cache_file true \
   --max_completion_length "${MAX_COMPLETION_LEN}" \
-  --num_train_epochs 1 \
+  --num_train_epochs "${NUM_TRAIN_EPOCHS}" \
   --per_device_train_batch_size "${PER_DEVICE_TRAIN_BATCH_SIZE}" \
   --learning_rate 1e-6 \
   --gradient_accumulation_steps "${GRADIENT_ACCUM_STEPS}" \
