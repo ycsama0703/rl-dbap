@@ -13,7 +13,26 @@ from pathlib import Path
 
 import pandas as pd
 
-from scripts.compute_metrics_from_debug import compute_metrics
+def _load_compute_metrics():
+    try:
+        from scripts.compute_metrics_from_debug import compute_metrics as cm  # type: ignore
+        return cm
+    except Exception:
+        # Fallback: load via file path to avoid import issues when scripts/ isn't a package
+        import importlib.util
+        import sys
+
+        module_path = Path(__file__).with_name("compute_metrics_from_debug.py")
+        spec = importlib.util.spec_from_file_location("compute_metrics_from_debug", module_path)
+        if spec is None or spec.loader is None:
+            raise
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["compute_metrics_from_debug_temp"] = module
+        spec.loader.exec_module(module)  # type: ignore[attr-defined]
+        return getattr(module, "compute_metrics")
+
+
+compute_metrics = _load_compute_metrics()
 
 
 def parse_args() -> argparse.Namespace:

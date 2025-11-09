@@ -40,11 +40,15 @@ def parse_args() -> argparse.Namespace:
         help="Add a run to compare, e.g. --run base outputs/debug_eval_outputs_base.csv",
     )
     ap.add_argument(
-        "--columns",
-        nargs="+",
-        default=COLUMNS,
-        help=f"Columns to summarize (default: {', '.join(COLUMNS)})",
+        "--truth-csv",
+        help="Optional separate CSV for y_true statistics (if omitted, y_true is read from each run).",
     )
+ap.add_argument(
+    "--columns",
+    nargs="+",
+    default=COLUMNS,
+    help=f"Columns to summarize (default: {', '.join(COLUMNS)})",
+)
     ap.add_argument(
         "--out-csv",
         help="Optional path to save the long-form statistics table.",
@@ -94,9 +98,15 @@ def analyze_run(name: str, csv_path: Path, columns: List[str]) -> List[dict]:
 
 def main() -> None:
     args = parse_args()
-    stats_rows: List[dict] = []
-    for name, csv_path in args.run:
-        stats_rows.extend(analyze_run(name, Path(csv_path), args.columns))
+stats_rows: List[dict] = []
+# Determine which columns to compute per run (y_true handled separately if truth_csv provided)
+run_columns = list(args.columns)
+if args.truth_csv:
+    stats_rows.extend(analyze_run("truth", Path(args.truth_csv), ["y_true"]))
+    run_columns = [col for col in args.columns if col != "y_true"]
+
+for name, csv_path in args.run:
+    stats_rows.extend(analyze_run(name, Path(csv_path), run_columns))
 
     if not stats_rows:
         raise SystemExit("No statistics computed (check column names / CSV paths).")
