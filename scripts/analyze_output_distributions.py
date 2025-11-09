@@ -43,12 +43,12 @@ def parse_args() -> argparse.Namespace:
         "--truth-csv",
         help="Optional separate CSV for y_true statistics (if omitted, y_true is read from each run).",
     )
-ap.add_argument(
-    "--columns",
-    nargs="+",
-    default=COLUMNS,
-    help=f"Columns to summarize (default: {', '.join(COLUMNS)})",
-)
+    ap.add_argument(
+        "--columns",
+        nargs="+",
+        default=COLUMNS,
+        help=f"Columns to summarize (default: {', '.join(COLUMNS)})",
+    )
     ap.add_argument(
         "--out-csv",
         help="Optional path to save the long-form statistics table.",
