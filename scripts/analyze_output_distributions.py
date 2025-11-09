@@ -98,15 +98,15 @@ def analyze_run(name: str, csv_path: Path, columns: List[str]) -> List[dict]:
 
 def main() -> None:
     args = parse_args()
-stats_rows: List[dict] = []
-# Determine which columns to compute per run (y_true handled separately if truth_csv provided)
-run_columns = list(args.columns)
-if args.truth_csv:
-    stats_rows.extend(analyze_run("truth", Path(args.truth_csv), ["y_true"]))
-    run_columns = [col for col in args.columns if col != "y_true"]
+    stats_rows: List[dict] = []
+    # Determine which columns to compute per run (y_true handled separately if truth_csv provided)
+    run_columns = list(args.columns)
+    if args.truth_csv:
+        stats_rows.extend(analyze_run("truth", Path(args.truth_csv), ["y_true"]))
+        run_columns = [col for col in args.columns if col != "y_true"]
 
-for name, csv_path in args.run:
-    stats_rows.extend(analyze_run(name, Path(csv_path), run_columns))
+    for name, csv_path in args.run:
+        stats_rows.extend(analyze_run(name, Path(csv_path), run_columns))
 
     if not stats_rows:
         raise SystemExit("No statistics computed (check column names / CSV paths).")
