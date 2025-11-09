@@ -63,15 +63,19 @@ def main() -> None:
     args = parse_args()
     truth = load_series(Path(args.truth_csv), "y_true")
 
+    # Plot truth histogram + KDE
     plt.figure(figsize=(10, 6))
     sns.histplot(truth, bins=args.bins, color="black", label="truth (y_true)", stat="density", kde=True, alpha=0.35)
+    if args.xlim:
+        truth = truth[(truth >= args.xlim[0]) & (truth <= args.xlim[1])]
 
     for name, csv_path in args.run:
         preds = load_series(Path(csv_path), "parsed_pred")
-        sns.kdeplot(preds, label=f"{name} parsed_pred")
-        sns.histplot(preds, bins=args.bins, alpha=0.2, stat="density")
+        if args.xlim:
+            preds = preds[(preds >= args.xlim[0]) & (preds <= args.xlim[1])]
+        sns.kdeplot(preds, label=f"{name} parsed_pred", linewidth=2)
 
-    plt.title("Holding Log Delta Distributions")
+    plt.title("Holding Log Delta Distributions (KDE)")
     plt.xlabel("value")
     plt.ylabel("density")
     if args.xlim:
