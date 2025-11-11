@@ -154,6 +154,10 @@ def build_for_file(
                     if isinstance(val, (list, tuple)) and len(val) >= 2:
                         name, ticker = val[0], val[1]
                 prompt = replace_ticker_line(prompt, permno_int, name, ticker, mode="append")
+                if ticker:
+                    extras["ticker"] = ticker
+                if name:
+                    extras["company"] = name
             rec = {"prompt": prompt, **extras}
             # Ensure numpy scalars are converted to Python types for JSON serialization
             def _json_default(o):

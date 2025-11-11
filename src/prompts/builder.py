@@ -55,6 +55,26 @@ def _safe_nonneg(x: float | int | None) -> float | None:
         return None
 
 
+def _row_payload(r: PromptRow) -> dict[str, str]:
+    """Return a JSON-serializable snapshot of a PromptRow with consistent formatting."""
+    def _fmt_or_na(val):
+        if val is None:
+            return "NA"
+        return _fmt(val)
+
+    return {
+        "me": _fmt_or_na(r.me),
+        "be": _fmt_or_na(r.be),
+        "profit": _fmt_or_na(r.profit),
+        "Gat": _fmt_or_na(r.Gat),
+        "beta": _fmt_or_na(r.beta),
+        "aum": _fmt_or_na(r.aum),
+        "outAUM": _fmt_or_na(r.outaum),
+        "holding": _fmt_or_na(r.holding_t),
+        "price": _fmt_or_na(r.prc),
+    }
+
+
 def build_history_prompt(
     hist_rows: Sequence[PromptRow],
     hide_date: bool = True,
@@ -149,6 +169,14 @@ def build_history_prompt(
         "label_delta": None,
         "label_log_delta": None,
         "label_delta_absolute": None,
+        "history_rows": {
+            "t-3": _row_payload(r_tm3),
+            "t-2": _row_payload(r_tm2),
+            "t-1": _row_payload(r_tm1),
+            "t": _row_payload(r_t),
+        },
+        "ticker": str(permno) if permno is not None else None,
+        "company": None,
     }
     if extras["holding_t"] is not None and extras["label_tp1"] is not None:
         try:
