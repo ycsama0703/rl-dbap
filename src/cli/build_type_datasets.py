@@ -46,7 +46,7 @@ def _format_row_for_prompt(row: dict | None) -> str:
     return ", ".join(f"{key}={_get(key)}" for key in ordered_keys)
 
 
-def _build_structured_prompt(rec: dict) -> str:
+def _build_structured_prompt(rec: dict, *, curr_only: bool = False) -> str:
     history = rec.get("history_rows")
     ticker = rec.get("ticker") or rec.get("permno") or "{ticker}"
     company = rec.get("company") or "the company"
@@ -56,13 +56,22 @@ def _build_structured_prompt(rec: dict) -> str:
     if not isinstance(history, dict):
         return rec.get("prompt") or rec.get("query") or ""
 
+    current_line = _format_row_for_prompt(history.get("t"))
+
+    if curr_only:
+        return (
+            "Given the current fundamentals for "
+            f"{ticker_str} ({company_str}), estimate the normalized log change in portfolio holding from time t to t+1.\n\n"
+            "Current (t):\n"
+            f"{current_line}"
+        )
+
     hist_parts = []
     for key_label in [("t-3", "{t-3}"), ("t-2", "{t-2}"), ("t-1", "{t-1}")]:
         tag, label = key_label
         row_line = _format_row_for_prompt(history.get(tag))
         hist_parts.append(f"{label}: {row_line}")
     hist_block = "\n".join(hist_parts)
-    current_line = _format_row_for_prompt(history.get("t"))
 
     return (
         "Given recent historical fundamentals and the current data for "
@@ -76,6 +85,32 @@ def _build_structured_prompt(rec: dict) -> str:
 
 def _ensure_dir(p: Path) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _parse_permno_filter(raw: str | None, path_str: str | None) -> set[int] | None:
+    vals: set[int] = set()
+
+    def _consume(text: str):
+        for token in re.split(r"[\s,]+", text.strip()):
+            if not token:
+                continue
+            try:
+                vals.add(int(token))
+            except Exception:
+                continue
+
+    if raw:
+        _consume(raw)
+    if path_str:
+        try:
+            p = Path(path_str)
+            if p.exists():
+                with p.open() as f:
+                    for line in f:
+                        _consume(line)
+        except Exception:
+            pass
+    return vals or None
 
 
 def _estimate_total_records(fp: Path, limit: Optional[int]) -> Optional[int]:
@@ -110,6 +145,7 @@ def _convert_prompts_to_sft(
     limit: Optional[int] = None,
     label: str = "sft",
     progress_every: int = 100,
+    curr_only_prompt: bool = False,
 ) -> int:
     from src.cli.prompts_to_sft import _resolve_absolute, _resolve_log_delta as _resolve_delta, _format_float
 
@@ -132,7 +168,7 @@ def _convert_prompts_to_sft(
     with inp.open("r", encoding="utf-8") as f, outp.open("w", encoding="utf-8") as fout:
         for line in f:
             rec = json.loads(line)
-            prompt = _build_structured_prompt(rec)
+            prompt = _build_structured_prompt(rec, curr_only=curr_only_prompt)
             if not prompt:
                 prompt = rec.get("prompt") or rec.get("query")
             if not prompt:
@@ -222,6 +258,7 @@ def _convert_prompts_to_grpo(
     limit: Optional[int] = None,
     label: str = "grpo",
     progress_every: int = 100,
+    curr_only_prompt: bool = False,
 ) -> int:
     _ensure_dir(outp)
     n = 0
@@ -235,7 +272,7 @@ def _convert_prompts_to_grpo(
     with inp.open("r", encoding="utf-8") as f, outp.open("w", encoding="utf-8") as fout:
         for line in f:
             rec = json.loads(line)
-            prompt = _build_structured_prompt(rec)
+            prompt = _build_structured_prompt(rec, curr_only=curr_only_prompt)
             if not prompt:
                 prompt = rec.get("prompt") or rec.get("query")
             if not prompt:
@@ -301,8 +338,16 @@ def main():
     # date splits
     ap.add_argument("--sft-end", type=str, default="2016-12-31")
     ap.add_argument("--grpo-start", type=str, default="2017-01-01")
-    ap.add_argument("--grpo-end", type=str, default="2018-12-31")
-    ap.add_argument("--test-start", type=str, default="2019-01-01")
+    ap.add_argument("--grpo-end", type=str, default="2021-12-31")
+    ap.add_argument("--test-start", type=str, default="2022-01-01")
+    ap.add_argument("--prompt-curr-only", action="store_true",
+                    help="If set, prompts only include the current (t) fundamentals block.")
+    ap.add_argument("--include-permnos", type=str, default="",
+                    help="Comma/space separated list of permnos to include. Empty = all.")
+    ap.add_argument("--include-permnos-file", type=str, default="",
+                    help="Optional file with permnos (one per line) to include.")
+    ap.add_argument("--single-ticker", type=str, default=None,
+                    help="Restrict to a single ticker (symbol). Implies --include-permnos for that ticker and disables sampling.")
     # filter control
     ap.add_argument("--exclude-zero-holding-t", dest="exclude_zero", action="store_true")
     ap.add_argument("--include-zero-holding-t", dest="exclude_zero", action="store_false")
@@ -340,6 +385,34 @@ def main():
     except Exception as e:
         print(f"[type-pipeline] mapping load failed: {e}")
 
+    permno_filter = _parse_permno_filter(args.include_permnos, args.include_permnos_file)
+    single_permno = None
+    single_ticker = args.single_ticker.strip().upper() if args.single_ticker else None
+    if single_ticker:
+        if mapping is None:
+            raise ValueError("--single-ticker requires ticker_mapping.csv to be loaded")
+        ticker_to_permnos: dict[str, list[int]] = {}
+        for perm, (_name, tick) in mapping.items():
+            if not tick:
+                continue
+            ticker_to_permnos.setdefault(tick.upper(), []).append(perm)
+        matches = ticker_to_permnos.get(single_ticker)
+        if not matches:
+            raise ValueError(f"ticker '{single_ticker}' not found in mapping")
+        matches = sorted(set(matches))
+        single_permno = matches[0]
+        if len(matches) > 1:
+            print(f"[type-pipeline] ticker {single_ticker} maps to multiple permnos {matches}; using {single_permno}")
+        permno_filter = {single_permno}
+        print(f"[type-pipeline] single-ticker mode: {single_ticker} -> permno {single_permno} (sampling disabled)")
+
+    if permno_filter:
+        sample_preview = ", ".join(str(p) for p in sorted(list(permno_filter))[:5])
+        more = "..." if len(permno_filter) > 5 else ""
+        print(f"[type-pipeline] restricting prompts to {len(permno_filter)} permnos: {sample_preview}{more}")
+
+    take_all_mode = single_permno is not None
+
     # outputs
     ph_sft_src = Path("artifacts/prompts_hist_sft") / f"{t}.jsonl"              # 构建原始 prompts 的输出（不带 think）
     ph_sft_enriched = Path("artifacts/prompts_hist_sft_with_think") / f"{t}.jsonl"  # DeepSeek 富集后的输入（带 think）
@@ -369,6 +442,9 @@ def main():
         use_tqdm=False,
         mapping=mapping,
         exclude_zero_holding_t=args.exclude_zero,
+        include_permnos=permno_filter,
+        take_all=take_all_mode,
+        limit_override=args.sft_limit,
     )
 
     print(f"[type-pipeline] building GRPO prompts for {t} ({args.grpo_start}..{args.grpo_end})")
@@ -386,6 +462,9 @@ def main():
         use_tqdm=False,
         mapping=mapping,
         exclude_zero_holding_t=args.exclude_zero,
+        include_permnos=permno_filter,
+        take_all=take_all_mode,
+        limit_override=args.grpo_limit,
     )
 
     print(f"[type-pipeline] building TEST prompts for {t} (>= {args.test_start})")
@@ -403,6 +482,9 @@ def main():
         use_tqdm=False,
         mapping=mapping,
         exclude_zero_holding_t=args.exclude_zero,
+        include_permnos=permno_filter,
+        take_all=take_all_mode,
+        limit_override=args.test_limit,
     )
 
     # 2) Convert
@@ -421,6 +503,7 @@ def main():
         think_template=args.sft_think_template,
         label=f"sft_train_{t}",
         progress_every=100,
+        curr_only_prompt=args.prompt_curr_only,
     )
 
 
@@ -434,6 +517,7 @@ def main():
         decimals=args.sft_decimals,
         label=f"test_chat_{t}",
         progress_every=100,
+        curr_only_prompt=args.prompt_curr_only,
     )
 
     print(f"[type-pipeline] convert GRPO -> dataset ({grpo_out})")
@@ -444,6 +528,7 @@ def main():
         no_think_example=args.grpo_no_think_example,
         label=f"grpo_{t}",
         progress_every=100,
+        curr_only_prompt=args.prompt_curr_only,
     )
 
     # 3) Report stats

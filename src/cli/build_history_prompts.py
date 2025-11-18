@@ -81,6 +81,9 @@ def build_for_file(
     use_tqdm: bool = False,
     mapping: dict | None = None,
     exclude_zero_holding_t: bool = False,
+    include_permnos: set[int] | None = None,
+    take_all: bool = False,
+    limit_override: int | None = None,
 ):
     t0 = time.perf_counter()
     print(f"[history-prompts] reading: {in_file}", flush=True)
@@ -99,6 +102,11 @@ def build_for_file(
             pass
     if "type" not in df.columns:
         df = df.copy(); df["type"] = in_file.stem
+    if include_permnos:
+        try:
+            df = df[df["permno"].isin(include_permnos)]
+        except Exception:
+            pass
     if head is not None and head > 0:
         # Keep head after sorting for deterministic subset
         df = df.sort_values(["type", "mgrno", "permno", "date"]).head(head)
@@ -111,16 +119,47 @@ def build_for_file(
         f"windows={len(windows):,}",
         flush=True,
     )
-    picked = stratified_sample_windows(
-        df,
-        windows,
-        per_type_limit=per_type_limit,
-        time_bins=time_bins,
-        cap_per_pair=cap_per_pair,
-        seed=seed,
-        exclude_zero_holding_t=exclude_zero_holding_t,
-    )
-    print(f"[history-prompts] {in_file.stem}: sampled={len(picked):,} (limit={per_type_limit})", flush=True)
+    def _nonzero_window(ws):
+        if not exclude_zero_holding_t:
+            return ws
+        kept = []
+        for w in ws:
+            try:
+                v = df.loc[w.idx_t]["holding_t"]
+                if pd.isna(v):
+                    continue
+                if float(v) == 0.0:
+                    continue
+                kept.append(w)
+            except Exception:
+                continue
+        return kept
+
+    if take_all:
+        picked = _nonzero_window(windows)
+        total_before = len(picked)
+        if limit_override is not None:
+            lim = max(0, int(limit_override))
+            picked = picked[:lim]
+        print(
+            f"[history-prompts] {in_file.stem}: selected {len(picked):,} / {total_before:,} windows (no sampling)",
+            flush=True,
+        )
+    else:
+        picked = stratified_sample_windows(
+            df,
+            windows,
+            per_type_limit=per_type_limit,
+            time_bins=time_bins,
+            cap_per_pair=cap_per_pair,
+            seed=seed,
+            exclude_zero_holding_t=exclude_zero_holding_t,
+        )
+        if limit_override is not None and limit_override >= 0:
+            lim = max(0, int(limit_override))
+            if lim < len(picked):
+                picked = picked[:lim]
+        print(f"[history-prompts] {in_file.stem}: sampled={len(picked):,} (limit={per_type_limit})", flush=True)
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
     n = 0
