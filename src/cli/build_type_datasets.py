@@ -25,12 +25,15 @@ def _role_from_type(inv_type: str | None) -> str:
     return role
 
 
-def _build_system_prompt(inv_type: str | None) -> str:
+def _build_system_prompt(inv_type: str | None, mgrno: str | int | None = None) -> str:
     role = _role_from_type(inv_type)
     role_segment = f"{role} " if role else ""
+    mgr_segment = ""
+    if mgrno:
+        mgr_segment = f" from manager {mgrno}"
     return (
         "A conversation between User and Assistant. The User provides financial data, and the Assistant, "
-        f"acting as a {role_segment}quantitative portfolio manager, reasons carefully and predicts portfolio adjustments."
+        f"acting as a {role_segment}quantitative portfolio manager{mgr_segment}, reasons carefully and predicts portfolio adjustments."
     )
 
 
@@ -138,6 +141,7 @@ def _convert_prompts_to_sft(
     outp: Path,
     *,
     system: str,
+    inv_type: str | None = None,
     with_think: bool = True,
     contract_mode: str = "delta",
     decimals: int = 2,
@@ -179,8 +183,10 @@ def _convert_prompts_to_sft(
 
             value = _format_float(float(label_val), decimals)
             resp_json = json.dumps({answer_key: value}, ensure_ascii=False)
+            mgrno_val = rec.get("mgrno")
+            system_content = _build_system_prompt(inv_type, mgrno_val) if inv_type else system
             msgs = [
-                {"role": "system", "content": system},
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": prompt},
             ]
             assistant_parts = []
@@ -254,6 +260,7 @@ def _convert_prompts_to_grpo(
     outp: Path,
     *,
     system: str,
+    inv_type: str | None = None,
     no_think_example: bool = False,
     limit: Optional[int] = None,
     label: str = "grpo",
@@ -277,14 +284,16 @@ def _convert_prompts_to_grpo(
                 prompt = rec.get("prompt") or rec.get("query")
             if not prompt:
                 continue
+            mgrno_val = rec.get("mgrno")
+            system_content = _build_system_prompt(inv_type, mgrno_val) if inv_type else system
             messages = [
-                {"role": "system", "content": system},
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": prompt},
             ]
             if not no_think_example:
                 messages.append({
                     "role": "assistant",
-                    "content": "<think>\n[Concise reasoning: compare changes in fundamentals, interpret their direction, relate to holding_t, and infer expected log change.]\n</think>\n<answer>\n{\"holding_log_delta\": [predicted_value]}\n</answer>",
+                    "content": "<think>\n[Analyze fundamental dynamics to derive the expected log change over holding_t.]\n</think>\n<answer>\n{\"holding_log_delta\": [predicted_value]}\n</answer>",
                     "loss": False,
                 })
             out = {
@@ -497,6 +506,7 @@ def main():
         sft_input_for_convert,
         sft_out,
         system=system_prompt,
+        inv_type=t,
         with_think=args.sft_with_think,
         contract_mode=args.sft_contract_mode,
         decimals=args.sft_decimals,
@@ -512,6 +522,7 @@ def main():
         ph_test,
         sft_test_out,
         system=system_prompt,
+        inv_type=t,
         with_think=False,
         contract_mode="absolute",
         decimals=args.sft_decimals,
@@ -525,6 +536,7 @@ def main():
         ph_grpo,
         grpo_out,
         system=system_prompt,
+        inv_type=t,
         no_think_example=args.grpo_no_think_example,
         label=f"grpo_{t}",
         progress_every=100,
