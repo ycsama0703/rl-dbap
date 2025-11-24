@@ -39,14 +39,35 @@ def _build_system_prompt(inv_type: str | None, mgrno: str | int | None = None) -
 
 def _format_row_for_prompt(row: dict | None) -> str:
     if not isinstance(row, dict):
-        return "me=NA, be=NA, profit=NA, Gat=NA, beta=NA, aum=NA, outAUM=NA, holding=NA, price=NA"
+        return (
+            "# Firm-level characteristics: core financial and risk attributes of the company.\n"
+            "me=NA, be=NA, profit=NA, Gat=NA, beta=NA\n\n"
+            "# Portfolio context: fund-level size metrics providing overall exposure scale.\n"
+            "aum=NA, outAUM=NA\n\n"
+            "# Benchmark reference: the stock’s weight in the S&P500 indicating relative market importance.\n"
+            "spx_weight=NA\n\n"
+            "# Current position: the fund’s existing exposure to the stock.\n"
+            "holding=NA, price=NA"
+        )
 
     def _get(key: str) -> str:
         val = row.get(key)
         return "NA" if val is None else str(val)
 
-    ordered_keys = ["me", "be", "profit", "Gat", "beta", "aum", "outAUM", "holding", "price"]
-    return ", ".join(f"{key}={_get(key)}" for key in ordered_keys)
+    parts = [
+        "# Firm-level characteristics: core financial and risk attributes of the company.",
+        f"me={_get('me')}, be={_get('be')}, profit={_get('profit')}, Gat={_get('Gat')}, beta={_get('beta')}",
+        "",
+        "# Portfolio context: fund-level size metrics providing overall exposure scale.",
+        f"aum={_get('aum')}, outAUM={_get('outAUM')}",
+        "",
+        "# Benchmark reference: the stock’s weight in the S&P500 indicating relative market importance.",
+        f"spx_weight={_get('sp500_weight')}",
+        "",
+        "# Current position: the fund’s existing exposure to the stock.",
+        f"holding={_get('holding')}, price={_get('price')}",
+    ]
+    return "\n".join(parts)
 
 
 def _build_structured_prompt(rec: dict, *, curr_only: bool = False) -> str:

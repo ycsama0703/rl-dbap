@@ -21,6 +21,7 @@ class PromptRow:
     aum: Optional[float] = None
     outaum: Optional[float] = None
     prc: Optional[float] = None
+    sp500_weight: Optional[float] = None
     date: Optional[str] = None
 
 
@@ -72,6 +73,7 @@ def _row_payload(r: PromptRow) -> dict[str, str]:
         "outAUM": _fmt_or_na(r.outaum),
         "holding": _fmt_or_na(r.holding_t),
         "price": _fmt_or_na(r.prc),
+        "sp500_weight": _fmt_or_na(r.sp500_weight),
     }
 
 
@@ -103,6 +105,7 @@ def build_history_prompt(
             f"me={_fmt(r.me)}, be={_fmt(r.be)}, profit={_fmt(r.profit)}, Gat={_fmt(r.Gat)}, beta={_fmt(r.beta)}\n"
             f"aum={_fmt(r.aum)}, outAUM={_fmt(r.outaum)}, holding={_fmt(r.holding_t)}"
             + (f", price={_fmt(r.prc)}" if r.prc is not None else "")
+            + (f", sp500_weight={_fmt(r.sp500_weight)}" if r.sp500_weight is not None else "")
         )
 
     # history changes (if available)

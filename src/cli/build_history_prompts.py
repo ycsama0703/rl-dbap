@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-from src.prompts.sampler import build_continuous_windows, stratified_sample_windows
+from src.prompts.sampler import _quarter_id, build_continuous_windows, stratified_sample_windows
 from src.prompts.builder import PromptRow, build_history_prompt
 
 try:
@@ -30,6 +30,7 @@ def _row_from_dfrow(r: pd.Series) -> PromptRow:
         aum=r.get("aum"),
         outaum=r.get("outaum"),
         prc=r.get("prc"),
+        sp500_weight=r.get("sp500_weight"),
         date=str(r.get("date")) if "date" in r.index else None,
     )
 
@@ -52,6 +53,36 @@ REQUIRED_COLS = [
     "type", "mgrno", "permno", "date", "holding_t", "holding_t1",
     "me", "be", "profit", "Gat", "beta", "aum", "outaum", "prc"
 ]
+
+_SP500_WEIGHTS = None
+
+
+def _load_sp500_weights(path: Path = Path("data/sp500_with_weights.csv")) -> pd.DataFrame | None:
+    """Load SP500 weights once and cache. Returns None if file missing/unreadable."""
+    global _SP500_WEIGHTS
+    if _SP500_WEIGHTS is not None:
+        return _SP500_WEIGHTS
+    if not path.exists():
+        print(f"[history-prompts] sp500 weights missing: {path}")
+        _SP500_WEIGHTS = None
+        return None
+    try:
+        w = pd.read_csv(path, parse_dates=["quarter_date"])
+        if not {"PERMNO", "quarter_date", "weight"}.issubset(w.columns):
+            print(f"[history-prompts] sp500 weights missing required columns in {path}")
+            _SP500_WEIGHTS = None
+            return None
+        w = w.rename(columns={"PERMNO": "permno"})
+        w["permno"] = w["permno"].astype(int)
+        # Align quarter id with _quarter_id: year*4 + quarter
+        q = w["quarter_date"]
+        w["qid"] = q.dt.year * 4 + q.dt.quarter
+        w = w[["permno", "qid", "weight"]].rename(columns={"weight": "sp500_weight"})
+        _SP500_WEIGHTS = w
+    except Exception as e:
+        print(f"[history-prompts] failed to load sp500 weights: {e}")
+        _SP500_WEIGHTS = None
+    return _SP500_WEIGHTS
 
 
 def _read_min_columns(fp: Path) -> pd.DataFrame:
@@ -110,6 +141,16 @@ def build_for_file(
     if head is not None and head > 0:
         # Keep head after sorting for deterministic subset
         df = df.sort_values(["type", "mgrno", "permno", "date"]).head(head)
+    # Merge SP500 weights by (permno, quarter) so the feature flows through sampling/prompts
+    weights = _load_sp500_weights()
+    if weights is not None:
+        try:
+            df = df.assign(__qid=_quarter_id(df["date"]))
+            df = df.merge(weights, how="left", left_on=["permno", "__qid"], right_on=["permno", "qid"])
+            df = df.drop(columns=["qid", "__qid"], errors="ignore")
+        except Exception as e:
+            df = df.drop(columns=["__qid"], errors="ignore")
+            print(f"[history-prompts] warning: failed to merge sp500 weights: {e}")
     # create windows and sample
     print(f"[history-prompts] building windows...", flush=True)
     windows = build_continuous_windows(df, use_tqdm=use_tqdm, progress_every=progress_every, label=in_file.stem)
