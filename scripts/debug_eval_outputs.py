@@ -48,7 +48,7 @@ def main() -> None:
     ap.set_defaults(force_think=False)
     args = ap.parse_args()
 
-    chats, y_true, quarters, ids, holding_ts = build_eval_inputs(args.test_path)
+    chats, y_true, quarters, ids, holding_ts, permnos, dates = build_eval_inputs(args.test_path)
     if args.limit is not None:
         limit = min(args.limit, len(chats))
         chats = chats[:limit]
@@ -56,6 +56,8 @@ def main() -> None:
         quarters = quarters[:limit]
         ids = ids[:limit]
         holding_ts = holding_ts[:limit]
+        permnos = permnos[:limit]
+        dates = dates[:limit]
 
     tokenizer, model = load_model_and_tokenizer(
         args.base_model, args.lora_path, torch_dtype=args.torch_dtype
@@ -98,10 +100,12 @@ def main() -> None:
             return None
 
     rows: List[Dict[str, Any]] = []
-    for idx, quarter, yt, ht, raw, pred in zip(ids, quarters, y_true, holding_ts, raw_outputs, preds):
+    for idx, quarter, yt, ht, raw, pred, pm, dt in zip(ids, quarters, y_true, holding_ts, raw_outputs, preds, permnos, dates):
         entry: Dict[str, Any] = {
             "id": idx,
             "quarter": quarter,
+            "date": dt,
+            "permno": pm,
             "holding_t": ht,
             "y_true": yt,
             "raw_output": raw,
@@ -125,6 +129,8 @@ def main() -> None:
             fieldnames=[
                 "id",
                 "quarter",
+                "date",
+                "permno",
                 "holding_t",
                 "y_true",
                 "raw_output",

@@ -114,7 +114,7 @@ def main() -> None:
     ap.set_defaults(force_think=False)
     args = ap.parse_args()
 
-    chat_inputs, y_true, quarters, ids, holding_ts = build_eval_inputs(args.test_path)
+    chat_inputs, y_true, quarters, ids, holding_ts, _permnos, _dates = build_eval_inputs(args.test_path)
     limit = min(args.limit, len(chat_inputs))
     subset_idxs = list(range(limit))
 

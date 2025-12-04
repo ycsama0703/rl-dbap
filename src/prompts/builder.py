@@ -184,6 +184,7 @@ def build_history_prompt(
         "permno": permno,
         "holding_t": r_t.holding_t,
         "label_tp1": (float(r_t.holding_t1) if r_t.holding_t1 is not None and not pd.isna(r_t.holding_t1) else None),
+        "date": r_t.date,
         "label_delta": None,
         "label_log_delta": None,
         "label_delta_absolute": None,

@@ -41,7 +41,7 @@ def main() -> None:
     ap.set_defaults(force_think=True)
     args = ap.parse_args()
 
-    chats, y_true, quarters, ids, holding_ts = build_eval_inputs(args.test_path)
+    chats, y_true, quarters, ids, holding_ts, _permnos, _dates = build_eval_inputs(args.test_path)
     if len(chats) == 0:
         raise SystemExit(f"No valid samples found in {args.test_path}")
 

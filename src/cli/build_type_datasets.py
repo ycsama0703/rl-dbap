@@ -267,6 +267,13 @@ def _convert_prompts_to_sft(
                 "loss": True,
             })
             out = {"messages": msgs}
+            meta_keys = [
+                "permno", "mgrno", "date", "holding_t",
+                "label_tp1", "label_log_delta", "label_delta_absolute", "history_rows",
+            ]
+            for k in meta_keys:
+                if k in rec:
+                    out[k] = rec[k]
             fout.write(json.dumps(out, ensure_ascii=False) + "\n")
             n += 1
             if pbar is not None:
@@ -384,6 +391,10 @@ def main():
                     help="Comma/space separated list of permnos to include. Empty = all.")
     ap.add_argument("--include-permnos-file", type=str, default="",
                     help="Optional file with permnos (one per line) to include.")
+    ap.add_argument("--test-permnos", type=str, default="",
+                    help="Comma/space separated list of permnos for TEST split. Empty = use --include-permnos.")
+    ap.add_argument("--test-permnos-file", type=str, default="",
+                    help="Optional file with permnos (one per line) for TEST split. Empty = use include-permnos; default fallback: data/sp500_top10_panel_2015_2024.csv if present.")
     ap.add_argument("--single-ticker", type=str, default=None,
                     help="Restrict to a single ticker (symbol). Implies --include-permnos for that ticker and disables sampling.")
     # filter control
@@ -424,6 +435,13 @@ def main():
         print(f"[type-pipeline] mapping load failed: {e}")
 
     permno_filter = _parse_permno_filter(args.include_permnos, args.include_permnos_file)
+    test_permno_filter = _parse_permno_filter(args.test_permnos, args.test_permnos_file)
+    if not test_permno_filter:
+        fallback = Path("data/sp500_top10_panel_2015_2024.csv")
+        if fallback.exists():
+            test_permno_filter = _parse_permno_filter(None, str(fallback))
+            if test_permno_filter:
+                print(f"[type-pipeline] TEST permnos defaulted to {fallback} ({len(test_permno_filter)})")
     single_permno = None
     single_ticker = args.single_ticker.strip().upper() if args.single_ticker else None
     if single_ticker:
@@ -448,8 +466,13 @@ def main():
         sample_preview = ", ".join(str(p) for p in sorted(list(permno_filter))[:5])
         more = "..." if len(permno_filter) > 5 else ""
         print(f"[type-pipeline] restricting prompts to {len(permno_filter)} permnos: {sample_preview}{more}")
+    if test_permno_filter:
+        sample_preview = ", ".join(str(p) for p in sorted(list(test_permno_filter))[:5])
+        more = "..." if len(test_permno_filter) > 5 else ""
+        print(f"[type-pipeline] TEST restricted to {len(test_permno_filter)} permnos: {sample_preview}{more}")
 
     take_all_mode = single_permno is not None
+    take_all_mode_test = take_all_mode or bool(test_permno_filter)
 
     # outputs
     ph_sft_src = Path("artifacts/prompts_hist_sft") / f"{t}.jsonl"              # 构建原始 prompts 的输出（不带 think）
@@ -523,8 +546,8 @@ def main():
         use_tqdm=False,
         mapping=mapping,
         exclude_zero_holding_t=args.exclude_zero,
-        include_permnos=permno_filter,
-        take_all=take_all_mode,
+        include_permnos=test_permno_filter or permno_filter,
+        take_all=take_all_mode_test,
         limit_override=args.test_limit,
     )
 

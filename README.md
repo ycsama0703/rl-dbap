@@ -182,6 +182,41 @@ python scripts/compute_metrics_from_debug.py \
 ```
 The emitted metrics mirror what `run_eval_strict.py` produces, covering both log-space and reconstructed holding statistics.
 
+## Custom Test Flow (top-k permno universe)
+
+For a focused evaluation on a fixed stock universe (e.g., S&P500 weight top 10):
+- Generate test prompts with permno filtering (default uses `data/sp500_top10_panel_2015_2024.csv` if present):
+  ```bash
+  python -m src.cli.build_type_datasets \
+    --type mutual_funds \
+    --in-dir data/processed/panel_quarter.parquet \
+    --history-len 2 \
+    --test-start 2023-01-01 \
+    --exclude-zero-holding-t \
+    --test-permnos-file data/sp500_top10_panel_2015_2024.csv \
+    --sft-limit 0 --grpo-limit 0 \
+    --per-type-limit 100000000 --test-limit 100000000 --cap-per-pair 100000000
+  ```
+  This writes `artifacts/prompts_hist_test/mutual_funds.jsonl` and `artifacts/test/test_mutual_funds.jsonl` with all available windows for the listed permnos.
+- Run inference and dump per-sample outputs:
+  ```bash
+  python scripts/debug_eval_outputs.py \
+    --test-path artifacts/test/test_mutual_funds.jsonl \
+    --base-model Qwen/Qwen2.5-7B-Instruct \
+    --lora-path outputs/grpo_mutual_funds/<run-id>/checkpoint-XXX \
+    --max-new-tokens 128 --force-think \
+    --out-csv outputs/debug_eval_outputs_topk.csv
+  ```
+- Aggregate by `permno,date` and compute per-stock errors:
+  ```bash
+  python scripts/aggregate_predictions.py \
+    --debug-csv outputs/debug_eval_outputs_topk.csv \
+    --out-prefix outputs/agg_topk
+  ```
+  Outputs:
+  - `outputs/agg_topk.by_date_permno.csv`: summed true/pred holdings per date/permno with errors.
+  - `outputs/agg_topk.per_stock.csv`: per-stock MAE/WAPE and sample counts.
+
 ## Real-time Monitoring with SwanLab (optional)
 
 1. Install and authenticate (once per machine):

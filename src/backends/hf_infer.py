@@ -233,10 +233,12 @@ def parse_holding_t(user_text: str) -> float | None:
         return None
 
 
-def build_eval_inputs(test_path: str) -> Tuple[List[List[Dict[str,str]]], List[float], List[str], List[int], List[float | None]]:
+def build_eval_inputs(test_path: str) -> Tuple[List[List[Dict[str,str]]], List[float], List[str], List[int], List[float | None], List[int | None], List[str | None]]:
     rows = load_samples(test_path)
     chat_inputs, y_true, quarter, ids = [], [], [], []
     holding_ts: List[float | None] = []
+    permnos: List[int | None] = []
+    dates: List[str | None] = []
     for i, r in enumerate(rows):
         msgs = r["messages"]
         sys = next((m for m in msgs if m["role"]=="system"), None)
@@ -255,4 +257,6 @@ def build_eval_inputs(test_path: str) -> Tuple[List[List[Dict[str,str]]], List[f
         quarter.append(parse_quarter_from_user(usr["content"]))
         ids.append(i)
         holding_ts.append(holding_val)
-    return chat_inputs, y_true, quarter, ids, holding_ts
+        permnos.append(r.get("permno"))
+        dates.append(r.get("date"))
+    return chat_inputs, y_true, quarter, ids, holding_ts, permnos, dates

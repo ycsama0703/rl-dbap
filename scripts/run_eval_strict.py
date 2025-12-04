@@ -44,7 +44,7 @@ def run_eval_strict(
     torch_dtype: str,
     force_think: bool,
 ) -> pd.DataFrame:
-    chat_inputs, y_true, quarters, ids, holding_ts = build_eval_inputs(test_path)
+    chat_inputs, y_true, quarters, ids, holding_ts, _permnos, _dates = build_eval_inputs(test_path)
 
     tokenizer, model = load_model_and_tokenizer(model_id, lora_path, torch_dtype=torch_dtype)
     model.eval()

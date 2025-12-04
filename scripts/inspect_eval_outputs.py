@@ -98,7 +98,7 @@ def main() -> None:
     args = ap.parse_args()
 
     print("[inspect] loading data...")
-    chat_inputs, y_true, quarters, ids, holding_ts = build_eval_inputs(args.test_path)
+    chat_inputs, y_true, quarters, ids, holding_ts, _permnos, _dates = build_eval_inputs(args.test_path)
     total = len(chat_inputs)
     if args.limit is not None:
         total = min(total, args.limit)
