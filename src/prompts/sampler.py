@@ -31,6 +31,7 @@ class WindowIndex:
     qid_t: int
     aum_t: float | None
     delta_sign: int | None
+    window_len: int = 4
 
 
 def build_continuous_windows(
@@ -39,11 +40,15 @@ def build_continuous_windows(
     use_tqdm: bool = False,
     progress_every: int = 2000,
     label: str | None = None,
+    window_len: int = 4,
 ) -> List[WindowIndex]:
-    """Create continuous t-3..t quarterly windows for each (type, mgrno, permno).
+    """Create continuous quarterly windows for each (type, mgrno, permno).
     Expects columns: ['type','mgrno','permno','date','holding_t','holding_t1','aum'] (others optional)
     Returns list of WindowIndex with absolute row indices.
+
+    window_len controls how many consecutive quarters are required (>=2).
     """
+    assert window_len >= 2, "need at least 2 quarters to build a window"
     assert {"type", "mgrno", "permno", "date", "holding_t"}.issubset(df.columns)
     out: List[WindowIndex] = []
     t0 = time.perf_counter()
@@ -71,7 +76,7 @@ def build_continuous_windows(
 
     seen = 0
     for (tp, mgr, perm), g in gb:
-        if len(g) < 4:
+        if len(g) < window_len:
             seen += 1
             if _use_tqdm and pbar is not None:
                 pbar.update(1)
@@ -80,9 +85,14 @@ def build_continuous_windows(
             continue
         q = g["__qid"].to_numpy()
         idx = g.index.to_numpy()
-        for i in range(3, len(g)):
-            # need strictly consecutive quarters: q[i]-q[i-1]==1 ...
-            if not (q[i] - q[i-1] == 1 and q[i-1] - q[i-2] == 1 and q[i-2] - q[i-3] == 1):
+        for i in range(window_len - 1, len(g)):
+            # need strictly consecutive quarters: q[i]-q[i-1]==1 ... for window_len steps
+            ok = True
+            for k in range(window_len - 1):
+                if q[i - k] - q[i - k - 1] != 1:
+                    ok = False
+                    break
+            if not ok:
                 continue
             # delta sign if label available
             ht = g.iloc[i]["holding_t"]
@@ -98,13 +108,14 @@ def build_continuous_windows(
             out.append(
                 WindowIndex(
                     group_key=(tp, mgr, perm),
-                    idx_tm3=int(idx[i-3]),
-                    idx_tm2=int(idx[i-2]),
-                    idx_tm1=int(idx[i-1]),
+                    idx_tm3=int(idx[i - 3]) if window_len >= 4 else int(idx[max(0, i - 3)]),
+                    idx_tm2=int(idx[i - 2]) if window_len >= 3 else int(idx[max(0, i - 2)]),
+                    idx_tm1=int(idx[i - 1]),
                     idx_t=int(idx[i]),
                     qid_t=int(q[i]),
                     aum_t=float(g.iloc[i]["aum"]) if "aum" in g.columns and pd.notna(g.iloc[i]["aum"]) else None,
                     delta_sign=dsign,
+                    window_len=window_len,
                 )
             )
         seen += 1

@@ -105,6 +105,7 @@ def build_for_file(
     cap_per_pair: int,
     seed: int,
     *,
+    history_len: int = 4,
     date_start: str | None = None,
     date_end: str | None = None,
     head: int | None = None,
@@ -153,7 +154,13 @@ def build_for_file(
             print(f"[history-prompts] warning: failed to merge sp500 weights: {e}")
     # create windows and sample
     print(f"[history-prompts] building windows...", flush=True)
-    windows = build_continuous_windows(df, use_tqdm=use_tqdm, progress_every=progress_every, label=in_file.stem)
+    windows = build_continuous_windows(
+        df,
+        use_tqdm=use_tqdm,
+        progress_every=progress_every,
+        label=in_file.stem,
+        window_len=history_len,
+    )
     print(
         f"[history-prompts] {in_file.stem}: rows={len(df):,} "
         f"groups={df.groupby(['type','mgrno','permno'], sort=False, observed=False).ngroups} "
@@ -216,7 +223,8 @@ def build_for_file(
             _use_tqdm = False
     with out_file.open("w", encoding="utf-8") as f:
         for i, w in enumerate(picked, 1):
-            rows = [df.loc[idx] for idx in (w.idx_tm3, w.idx_tm2, w.idx_tm1, w.idx_t)]
+            idxs = [w.idx_tm3, w.idx_tm2, w.idx_tm1, w.idx_t]
+            rows = [df.loc[idx] for idx in idxs[-history_len:]]
             hist_rows = [_row_from_dfrow(r) for r in rows]
             prompt, extras = build_history_prompt(hist_rows, hide_date=True, target="delta", strict_contract=True)
             prompt = _normalize_prompt_text(prompt)
@@ -281,6 +289,7 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     # Speed/visibility knobs
     ap.add_argument("--max-files", type=int, default=None, help="Process at most N parquet files")
+    ap.add_argument("--history-len", type=int, default=4, choices=[2, 4], help="Number of consecutive quarters per window (default: 4)")
     ap.add_argument("--date-start", type=str, default=None, help="Filter rows with date >= this (e.g., 2015-01-01)")
     ap.add_argument("--date-end", type=str, default=None, help="Filter rows with date <= this (e.g., 2020-12-31)")
     ap.add_argument("--head", type=int, default=None, help="Use only first N rows after sorting (debug speed)")
@@ -323,6 +332,7 @@ def main():
             args.time_bins,
             args.cap_per_pair,
             args.seed,
+            history_len=args.history_len,
             date_start=args.date_start,
             date_end=args.date_end,
             head=args.head,

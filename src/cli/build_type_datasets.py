@@ -91,10 +91,16 @@ def _build_structured_prompt(rec: dict, *, curr_only: bool = False) -> str:
         )
 
     hist_parts = []
-    for key_label in [("t-3", "{t-3}"), ("t-2", "{t-2}"), ("t-1", "{t-1}")]:
-        tag, label = key_label
-        row_line = _format_row_for_prompt(history.get(tag))
-        hist_parts.append(f"{label}: {row_line}")
+    # gather available historical keys like t-1, t-2 ... sorted oldest -> newest
+    hist_keys = [k for k in history.keys() if k.startswith("t-")]
+    def _key_order(k: str) -> int:
+        try:
+            return -int(k.split("-")[1])
+        except Exception:
+            return 0
+    for k in sorted(hist_keys, key=_key_order, reverse=True):
+        row_line = _format_row_for_prompt(history.get(k))
+        hist_parts.append(f"{{{k} data}}: {row_line}")
     hist_block = "\n".join(hist_parts)
 
     return (
@@ -372,6 +378,8 @@ def main():
     ap.add_argument("--test-start", type=str, default="2022-01-01")
     ap.add_argument("--prompt-curr-only", action="store_true",
                     help="If set, prompts only include the current (t) fundamentals block.")
+    ap.add_argument("--history-len", type=int, choices=[2, 4], default=4,
+                    help="Number of consecutive quarters per window (default: 4; set 2 for t-1,t windows).")
     ap.add_argument("--include-permnos", type=str, default="",
                     help="Comma/space separated list of permnos to include. Empty = all.")
     ap.add_argument("--include-permnos-file", type=str, default="",
@@ -465,6 +473,7 @@ def main():
         time_bins=10,
         cap_per_pair=3,
         seed=42,
+        history_len=args.history_len,
         date_start=None,
         date_end=args.sft_end,
         head=None,
@@ -485,6 +494,7 @@ def main():
         time_bins=10,
         cap_per_pair=3,
         seed=42,
+        history_len=args.history_len,
         date_start=args.grpo_start,
         date_end=args.grpo_end,
         head=None,
@@ -505,6 +515,7 @@ def main():
         time_bins=10,
         cap_per_pair=3,
         seed=42,
+        history_len=args.history_len,
         date_start=args.test_start,
         date_end=None,
         head=None,

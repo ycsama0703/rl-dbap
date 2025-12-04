@@ -83,13 +83,15 @@ def build_history_prompt(
     target: str = "delta",  # "delta" or "absolute"
     strict_contract: bool = True,
 ) -> tuple[str, dict]:
-    """Build a prompt like the figure: t-3, t-2, t-1 history + new data.
+    """Build a prompt from historical rows up to current t.
 
     Returns (prompt_text, extras_dict) where extras includes fields used for labels.
-    hist_rows: length >= 4, order [t-3, t-2, t-1, t]
+    hist_rows: order oldest -> newest, length >= 2 (supports 2 or 4 by default)
     """
-    assert len(hist_rows) >= 4, "need at least 4 rows: t-3..t"
-    r_tm3, r_tm2, r_tm1, r_t = hist_rows[-4], hist_rows[-3], hist_rows[-2], hist_rows[-1]
+    assert len(hist_rows) >= 2, "need at least 2 rows: t-1 and t"
+    r_t = hist_rows[-1]
+    # keep last up to 4 rows for labeling convenience; labels are dynamic
+    window_len = len(hist_rows)
 
     role_raw = r_t.investor_type or "Unknown"
     role = role_raw.strip() if isinstance(role_raw, str) else str(role_raw)
@@ -137,11 +139,19 @@ def build_history_prompt(
             f"Your goal is to adjust your portfolio holdings for {{ticker}} according to the change in fundamental data.\n\n"
         )
 
-    hist = (
-        f"{{t-3 data}}\n{block('', r_tm3)}\nholding_log_delta: {change(r_tm3, r_tm2)}\n\n"
-        f"{{t-2 data}}\n{block('', r_tm2)}\nholding_log_delta: {change(r_tm2, r_tm1)}\n\n"
-        f"{{t-1 data}}\n{block('', r_tm1)}\nholding_log_delta: {change(r_tm1, r_t)}\n\n"
-    )
+    # Build history blocks dynamically (exclude current t)
+    hist_only = hist_rows[:-1]
+    hist_lines = []
+    for i, row in enumerate(hist_only):
+        offset = len(hist_only) - i
+        hist_lines.append(f"{{t-{offset} data}}\n{block('', row)}")
+        # change to next point (next historical if exists, else current t)
+        next_row = hist_only[i + 1] if i + 1 < len(hist_only) else r_t
+        hist_lines.append(f"holding_log_delta: {change(row, next_row)}")
+        hist_lines.append("")  # blank line separator
+    hist = "\n".join(hist_lines)
+    if hist and not hist.endswith("\n\n"):
+        hist += "\n"
 
     now_block = f"Now, these are the new data:\n{block('{t data}', r_t)}\n\n"
 
@@ -164,6 +174,11 @@ def build_history_prompt(
     prompt += hist + now_block
     prompt += instructions
 
+    history_dict = {"t": _row_payload(r_t)}
+    # Map historical rows with dynamic keys (t-1, t-2, ...)
+    for idx, row in enumerate(reversed(hist_only), 1):
+        history_dict[f"t-{idx}"] = _row_payload(row)
+
     extras = {
         "mgrno": mgrno,
         "permno": permno,
@@ -172,12 +187,7 @@ def build_history_prompt(
         "label_delta": None,
         "label_log_delta": None,
         "label_delta_absolute": None,
-        "history_rows": {
-            "t-3": _row_payload(r_tm3),
-            "t-2": _row_payload(r_tm2),
-            "t-1": _row_payload(r_tm1),
-            "t": _row_payload(r_t),
-        },
+        "history_rows": history_dict,
         "ticker": str(permno) if permno is not None else None,
         "company": None,
     }
