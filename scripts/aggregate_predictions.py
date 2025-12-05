@@ -49,6 +49,8 @@ def main():
         .agg(
             mae=("abs_err", lambda x: np.mean(np.abs(x))),
             wape=("abs_err", lambda x: np.sum(np.abs(x)) / np.sum(np.abs(agg.loc[x.index, "true_tp1_sum"]))),
+            true_tp1_total=("true_tp1_sum", "sum"),
+            pred_tp1_total=("pred_tp1_sum", "sum"),
             samples=("samples", "sum"),
         )
         .reset_index()
@@ -65,7 +67,9 @@ def main():
         per_stock = per_stock.rename(columns={"TICKER": "ticker", "COMNAM": "name"})
         # reorder for readability
         agg = agg[["permno", "ticker", "name", "date", "pred_tp1_sum", "true_tp1_sum", "abs_err", "ape", "samples"]]
-        per_stock = per_stock[["permno", "ticker", "name", "mae", "wape", "samples"]]
+        per_stock = per_stock[
+            ["permno", "ticker", "name", "mae", "wape", "true_tp1_total", "pred_tp1_total", "samples"]
+        ]
     except Exception as e:
         print(f"[aggregate] mapping load failed or skipped: {e}")
 
