@@ -43,6 +43,7 @@ def main():
     )
     agg["abs_err"] = agg["pred_tp1_sum"] - agg["true_tp1_sum"]
     agg["ape"] = (agg["abs_err"].abs() / agg["true_tp1_sum"].abs().clip(lower=1e-6))
+    agg["pct_err"] = 100.0 * agg["abs_err"] / agg["true_tp1_sum"].replace(0, np.nan)
 
     per_stock = (
         agg.groupby("permno")
