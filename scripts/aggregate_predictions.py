@@ -14,6 +14,8 @@ def main():
     ap = argparse.ArgumentParser(description="Aggregate holding predictions by date/permno")
     ap.add_argument("--debug-csv", required=True, help="CSV from scripts/debug_eval_outputs.py")
     ap.add_argument("--out-prefix", default="outputs/agg", help="Prefix for aggregated outputs")
+    ap.add_argument("--ticker-mapping", default="data/ticker_mapping.csv",
+                    help="CSV with PERMNO,TICKER,COMNAM columns for labeling outputs")
     args = ap.parse_args()
 
     df = pd.read_csv(args.debug_csv)
@@ -52,6 +54,20 @@ def main():
         .reset_index()
         .sort_values("wape")
     )
+
+    # Attach ticker/name labels if available
+    try:
+        map_df = pd.read_csv(args.ticker_mapping)
+        map_last = map_df.sort_index().groupby("PERMNO").tail(1)[["PERMNO", "TICKER", "COMNAM"]]
+        agg = agg.merge(map_last, left_on="permno", right_on="PERMNO", how="left").drop(columns=["PERMNO"])
+        agg = agg.rename(columns={"TICKER": "ticker", "COMNAM": "name"})
+        per_stock = per_stock.merge(map_last, left_on="permno", right_on="PERMNO", how="left").drop(columns=["PERMNO"])
+        per_stock = per_stock.rename(columns={"TICKER": "ticker", "COMNAM": "name"})
+        # reorder for readability
+        agg = agg[["permno", "ticker", "name", "date", "pred_tp1_sum", "true_tp1_sum", "abs_err", "ape", "samples"]]
+        per_stock = per_stock[["permno", "ticker", "name", "mae", "wape", "samples"]]
+    except Exception as e:
+        print(f"[aggregate] mapping load failed or skipped: {e}")
 
     out_base = Path(args.out_prefix)
     out_base.parent.mkdir(parents=True, exist_ok=True)
