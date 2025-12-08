@@ -40,17 +40,18 @@ def parse_args() -> argparse.Namespace:
     return ap.parse_args()
 
 
-def load_model(path: str, device_map: str | None = None):
-    tok = AutoTokenizer.from_pretrained(path, use_fast=False, trust_remote_code=True)
-    if tok.pad_token_id is None:
-        tok.pad_token = tok.eos_token
+def load_model(path: str, tok=None, device_map: str | None = None):
+    """Load a model; if tok is provided, reuse it, otherwise load a tokenizer."""
+    local_tok = tok or AutoTokenizer.from_pretrained(path, use_fast=False, trust_remote_code=True)
+    if local_tok.pad_token_id is None:
+        local_tok.pad_token = local_tok.eos_token
     mdl = AutoModelForCausalLM.from_pretrained(
         path,
         trust_remote_code=True,
         torch_dtype="auto",
         device_map=device_map,
     )
-    return tok, mdl
+    return local_tok, mdl
 
 
 def main():
@@ -58,9 +59,16 @@ def main():
     train_ds = _load_split(args.train_path, "train")
     eval_ds = _load_split(args.eval_path, "train") if args.eval_path else None
 
-    student_tok, student_mdl = load_model(args.student, device_map="auto")
-    teacher_tok, teacher_mdl = load_model(args.teacher, device_map="auto")
-    # Teacher tokenizer is not used directly; only the model weights are needed by GKDTrainer.
+    # Use a shared tokenizer to align vocab sizes between student and teacher.
+    shared_tok, teacher_mdl = load_model(args.teacher, tok=None, device_map="auto")
+    student_tok, student_mdl = load_model(args.student, tok=shared_tok, device_map="auto")
+
+    # Ensure vocab sizes match tokenizer length to avoid logits shape mismatch.
+    vocab_len = len(shared_tok)
+    if student_mdl.get_input_embeddings().weight.shape[0] != vocab_len:
+        student_mdl.resize_token_embeddings(vocab_len)
+    if teacher_mdl.get_input_embeddings().weight.shape[0] != vocab_len:
+        teacher_mdl.resize_token_embeddings(vocab_len)
 
     gkd_cfg = GKDConfig(
         output_dir=args.output_dir,
