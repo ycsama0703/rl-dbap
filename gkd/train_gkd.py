@@ -36,7 +36,6 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--logging-steps", type=int, default=50)
     ap.add_argument("--save-steps", type=int, default=500)
     ap.add_argument("--eval-steps", type=int, default=500)
-    ap.add_argument("--max-seq-length", type=int, default=2048)
     ap.add_argument("--bf16", action="store_true", help="Use bfloat16")
     return ap.parse_args()
 
@@ -69,7 +68,6 @@ def main():
         save_steps=args.save_steps,
         eval_steps=args.eval_steps,
         bf16=args.bf16,
-        max_seq_length=args.max_seq_length,
     )
 
     trainer = GKDTrainer(
