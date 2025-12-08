@@ -40,11 +40,16 @@ def parse_args() -> argparse.Namespace:
     return ap.parse_args()
 
 
-def load_model(path: str):
+def load_model(path: str, device_map: str | None = None):
     tok = AutoTokenizer.from_pretrained(path, use_fast=False, trust_remote_code=True)
     if tok.pad_token_id is None:
         tok.pad_token = tok.eos_token
-    mdl = AutoModelForCausalLM.from_pretrained(path, trust_remote_code=True)
+    mdl = AutoModelForCausalLM.from_pretrained(
+        path,
+        trust_remote_code=True,
+        torch_dtype="auto",
+        device_map=device_map,
+    )
     return tok, mdl
 
 
@@ -53,8 +58,8 @@ def main():
     train_ds = _load_split(args.train_path, "train")
     eval_ds = _load_split(args.eval_path, "train") if args.eval_path else None
 
-    student_tok, student_mdl = load_model(args.student)
-    teacher_tok, teacher_mdl = load_model(args.teacher)
+    student_tok, student_mdl = load_model(args.student, device_map="auto")
+    teacher_tok, teacher_mdl = load_model(args.teacher, device_map="auto")
     # Teacher tokenizer is not used directly; only the model weights are needed by GKDTrainer.
 
     gkd_cfg = GKDConfig(
