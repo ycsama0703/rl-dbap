@@ -414,7 +414,14 @@ def main():
                     default="",
                     help="Template injected when --sft-with-think is active (leave blank to auto-generate reasoning)")
     ap.add_argument("--grpo-no-think-example", action="store_true")
+    ap.add_argument("--emit-base-min-test", dest="emit_base_min", action="store_true",
+                    help="Also emit a minimal-format test set for base model parsing (no think, simple system prompt).")
+    ap.add_argument("--no-emit-base-min-test", dest="emit_base_min", action="store_false")
+    ap.add_argument("--emit-distill-copy", dest="emit_distill", action="store_true",
+                    help="Copy GRPO chat dataset to artifacts/distill/<type>_distill.jsonl for distillation.")
+    ap.add_argument("--no-emit-distill-copy", dest="emit_distill", action="store_false")
     ap.set_defaults(sft_with_think=True)
+    ap.set_defaults(emit_base_min=True, emit_distill=True)
     args = ap.parse_args()
 
     t = args.type
@@ -484,6 +491,8 @@ def main():
     # Put test chat JSONL into a separate folder to avoid mixing with SFT train data
     sft_test_out = Path("artifacts/test") / f"test_{t}.jsonl"
     grpo_out = Path("artifacts/grpo") / f"grpo_{t}.jsonl"
+    base_min_out = Path("artifacts/test") / f"test_{t}_base_min.jsonl"
+    distill_out = Path("artifacts/distill") / f"{t}_distill.jsonl"
 
     system_prompt = _build_system_prompt(t)
 
@@ -586,6 +595,21 @@ def main():
         curr_only_prompt=args.prompt_curr_only,
     )
 
+    if args.emit_base_min:
+        print(f"[type-pipeline] convert TEST -> base-min chat ({base_min_out})")
+        _convert_prompts_to_sft(
+            ph_test,
+            base_min_out,
+            system='Output exactly one JSON: {"holding_tp1": <float with 2 decimals>}. No other text.',
+            inv_type=None,
+            with_think=False,
+            contract_mode="absolute",
+            decimals=args.sft_decimals,
+            label=f"test_base_min_{t}",
+            progress_every=100,
+            curr_only_prompt=args.prompt_curr_only,
+        )
+
     print(f"[type-pipeline] convert GRPO -> dataset ({grpo_out})")
     _convert_prompts_to_grpo(
         ph_grpo,
@@ -597,6 +621,15 @@ def main():
         progress_every=100,
         curr_only_prompt=args.prompt_curr_only,
     )
+
+    if args.emit_distill:
+        try:
+            distill_out.parent.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.copy(grpo_out, distill_out)
+            print(f"[type-pipeline] distill copy -> {distill_out}")
+        except Exception as e:
+            print(f"[type-pipeline] distill copy failed: {e}")
 
     # 3) Report stats
     stats_files = [
