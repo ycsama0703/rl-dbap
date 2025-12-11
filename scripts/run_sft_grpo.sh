@@ -14,8 +14,9 @@ SFT_OUTPUT_DIR=${SFT_OUTPUT_DIR:-outputs/sft_mutual_funds}
 GRPO_OUTPUT_DIR=${GRPO_OUTPUT_DIR:-outputs/grpo_mutual_funds}
 
 # Default training commands (edit to your needs or override via env).
-SFT_CMD=${SFT_CMD:-"python -m src.cli.train_sft --train-file artifacts/sft/sft_train_mutual_funds.jsonl --output-dir ${SFT_OUTPUT_DIR} --num-train-epochs 1 --per-device-train-batch-size 1 --bf16 --logging-steps 10"}
-GRPO_CMD_PREFIX=${GRPO_CMD_PREFIX:-"python -m src.cli.train_grpo --train-file artifacts/grpo/grpo_mutual_funds.jsonl --output-dir ${GRPO_OUTPUT_DIR} --num-train-epochs 1 --per-device-train-batch-size 1 --bf16 --logging-steps 10"}
+# We reuse the provided sft.sh / grpo.sh wrappers (swift).
+SFT_CMD=${SFT_CMD:-"bash scripts/sft.sh -m Qwen/Qwen2.5-7B-Instruct -d artifacts/sft/sft_train_mutual_funds.jsonl -o ${SFT_OUTPUT_DIR} -- --num_train_epochs 1"}
+GRPO_CMD_PREFIX=${GRPO_CMD_PREFIX:-"bash scripts/grpo.sh -m Qwen/Qwen2.5-7B-Instruct -d artifacts/grpo/grpo_mutual_funds.jsonl -o ${GRPO_OUTPUT_DIR} -g 4 -l 512 -b 2 -A 4"}
 # ------------------------------------------
 
 echo "[run] SFT -> GRPO pipeline start"
