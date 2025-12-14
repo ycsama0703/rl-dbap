@@ -198,6 +198,72 @@ For a focused evaluation on a fixed stock universe (e.g., S&P500 weight top 10):
     --per-type-limit 100000000 --test-limit 100000000 --cap-per-pair 100000000
   ```
   This writes `artifacts/prompts_hist_test/mutual_funds.jsonl` and `artifacts/test/test_mutual_funds.jsonl` with all available windows for the listed permnos.
+
+## Profile 聚类与行为权重（mutual_funds / banks）
+基于持仓面板抽象投资者-季度画像，区分内部风格。
+
+### 1) 过滤白名单
+（如需 top30 股票）生成过滤后的面板，例如：
+```bash
+python - <<'PY'
+import pandas as pd, os
+whitelist = set(pd.read_csv("data/sp500_top30_panel_2015_2024.csv")["PERMNO"].astype(int))
+for name in ["mutual_funds", "banks"]:
+    src = f"data/processed/panel_quarter.parquet/{name}.parquet"
+    dst = f"artifacts/features/{name}_top30.parquet"
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    df = pd.read_parquet(src)
+    df = df[df["permno"].astype(int).isin(whitelist)]
+    df.to_parquet(dst, index=False, compression="snappy")
+    print(name, len(df), "rows after filter")
+PY
+```
+
+### 2) Stage1：投资者-季度特征
+规范 type（小写+下划线），权重优先价格→市值，否则按持仓占比。
+```bash
+python scripts/build_investor_quarter_features.py \
+  --in-path artifacts/features/mutual_funds_top30.parquet \
+  --out-path artifacts/features/mutual_funds_iq_features.csv \
+  --holding-col holding_t --price-col prc
+```
+
+### 3) Stage2：聚类得到 profile_k
+（默认 K=4，可用 `--n-clusters 8` 等）
+```bash
+python scripts/cluster_investor_profiles.py \
+  --in-path artifacts/features/mutual_funds_iq_features.csv \
+  --out-path artifacts/features/mutual_funds_iq_profile.csv \
+  --n-clusters 4 --random-state 42
+```
+
+### 4) Stage3：估计行为权重（alpha/risk/tc/te）
+回归 delta_w，对应类型/profile 输出归一化权重。
+```bash
+python scripts/build_profile_objective_weights.py \
+  --holdings artifacts/features/mutual_funds_top30.parquet \
+  --profiles artifacts/features/mutual_funds_iq_profile.csv \
+  --out-path artifacts/features/mutual_funds_profile_objective_weights.csv \
+  --holding-col holding_t --price-col prc --type-col type
+```
+
+### 5) 可视化
+- 权重堆叠柱状（可传多文件对比类型）：  
+```bash
+python scripts/plot_profile_weights.py \
+  --inputs artifacts/features/mutual_funds_profile_objective_weights.csv \
+           artifacts/features/banks_profile_objective_weights.csv \
+  --out artifacts/features/profile_weights_compare.png
+```
+- PCA 质心（多类型合并，标注 p0/p1…）：  
+```bash
+python scripts/plot_profile_centers.py \
+  --features artifacts/features/mutual_funds_iq_features.csv artifacts/features/banks_iq_features.csv \
+  --profiles artifacts/features/mutual_funds_iq_profile.csv artifacts/features/banks_iq_profile.csv \
+  --out artifacts/features/profile_centers_combined.png
+```
+
+说明：type 会在脚本内统一为小写+下划线避免同义分裂；输出支持 CSV/Parquet。若列名与默认不符，用参数覆盖（如 holding/price）。
 - Run inference and dump per-sample outputs:
   ```bash
   python scripts/debug_eval_outputs.py \
