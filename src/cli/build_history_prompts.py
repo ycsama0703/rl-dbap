@@ -6,6 +6,7 @@ import numpy as np
 
 from src.prompts.sampler import _quarter_id, build_continuous_windows, stratified_sample_windows
 from src.prompts.builder import PromptRow, build_history_prompt
+from src.cli.compute_type_profiles import load_market_quarterly
 
 try:
     # Reuse mapping utilities if available
@@ -198,6 +199,7 @@ def build_for_file(
     profile_dir: Path | None = None,
     profile_weights_dir: Path | None = None,
     random_sample: bool = False,
+    market_df: pd.DataFrame | None = None,
 ):
     t0 = time.perf_counter()
     print(f"[history-prompts] reading: {in_file}", flush=True)
@@ -363,6 +365,17 @@ def build_for_file(
             except Exception:
                 pass
             rec = {"prompt": prompt, **extras}
+            # attach market aggregates for the target quarter (prev-quarter mean)
+            try:
+                if market_df is not None and extras.get("date") is not None:
+                    dt = pd.to_datetime(extras["date"]).tz_localize(None)
+                    mrow = market_df.loc[market_df["date"] == dt]
+                    if not mrow.empty:
+                        extras["vix_q_prev"] = float(mrow.iloc[0]["vix"])
+                        extras["ln_market_volume_q_prev"] = float(mrow.iloc[0]["ln_market_volume"])
+            except Exception:
+                pass
+
             # Ensure numpy scalars are converted to Python types for JSON serialization
             def _json_default(o):
                 if isinstance(o, (np.integer,)):
@@ -415,6 +428,8 @@ def main():
     ap.add_argument("--profile-dir", type=str, default=None, help="Directory with *_iq_profile.(csv|parquet) per type (optional)")
     ap.add_argument("--profile-weights-dir", type=str, default=None, help="Directory with *_profile_objective_weights.(csv|parquet) (optional)")
     ap.add_argument("--random-sample", action="store_true", help="Use simple random sampling (shuffled) instead of stratified sampling.")
+    ap.add_argument("--vix-path", type=str, default="data/VIXCLS.csv", help="Daily VIX csv (for market aggregation, optional)")
+    ap.add_argument("--volume-path", type=str, default="data/sp500_market_volume.csv", help="Daily SP500 volume csv (for market aggregation, optional)")
     args = ap.parse_args()
 
     in_dir = Path(args.in_dir)
@@ -422,6 +437,11 @@ def main():
     inc = {s.strip() for s in args.include_types.split(',') if s.strip()}
     exc = {s.strip() for s in args.exclude_types.split(',') if s.strip()}
     total = 0
+    market_df = None
+    try:
+        market_df = load_market_quarterly(Path(args.vix_path), Path(args.volume_path))
+    except Exception as e:
+        print(f"[history-prompts] warn: failed to load market data: {e}")
     # Load ticker mapping automatically if available
     mp = None
     try:
@@ -462,6 +482,7 @@ def main():
             profile_dir=Path(args.profile_dir) if args.profile_dir else None,
             profile_weights_dir=Path(args.profile_weights_dir) if args.profile_weights_dir else None,
             random_sample=args.random_sample,
+            market_df=market_df,
         )
         print(f"[history-prompts] {fp.stem}: wrote {n} -> {outp}")
         total += n

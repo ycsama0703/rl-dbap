@@ -28,9 +28,10 @@ PER_DEVICE_TRAIN_BATCH_SIZE=2
 GRADIENT_ACCUM_STEPS=4
 LORA_RANK=32
 LORA_ALPHA=128
-# 默认使用 格式/数值/方向 奖励 (格式 5%，数值 75%，方向 20%)
-REWARD_FUNCS=(contract_holdings huber_holdings direction_holdings)
-REWARD_WEIGHTS=(0.05 0.60 0.35)
+# 默认使用：格式 + 数值 + Profile 约束（方向奖励关闭）
+# 可按需在命令行用 -F/-W 覆盖
+REWARD_FUNCS=(contract_holdings huber_holdings profile_numeric_deviation)
+REWARD_WEIGHTS=(0.05 0.70 0.25)
 
 # Optional logging targets (can also be supplied via environment variables, e.g. SWIFT_REPORT_TO=swanlab)
 REPORT_TO="${SWIFT_REPORT_TO:-}"

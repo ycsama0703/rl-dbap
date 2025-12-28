@@ -9,6 +9,7 @@ import re
 
 from src.cli.build_history_prompts import build_for_file
 from src.cli.prompts_to_sft import _build_auto_think
+from src.cli.compute_type_profiles import load_market_quarterly
 
 try:
     from src.cli.map_ticker_names import load_mapping  # type: ignore
@@ -395,6 +396,7 @@ Do NOT guess or mention any true labels. Focus on reasoning only (<=4 sentences)
             meta_keys = [
                 "permno", "mgrno", "date", "holding_t", "shares",
                 "label_tp1", "label_log_delta", "label_delta_absolute", "history_rows",
+                "vix_q_prev", "ln_market_volume_q_prev",
                 "label_profile_k", "label_prev_profile_k", "objective_weights",
             ]
             for k in meta_keys:
@@ -554,6 +556,8 @@ def _convert_prompts_to_grpo(
                 "shares": rec.get("shares"),
                 "mgrno": rec.get("mgrno"),
                 "permno": rec.get("permno"),
+                "vix_q_prev": rec.get("vix_q_prev"),
+                "ln_market_volume_q_prev": rec.get("ln_market_volume_q_prev"),
                 "label_profile_k": prof_k,
                 "label_prev_profile_k": prof_prev,
                 # reward/EMA-facing objective weights (model不可见)
@@ -644,11 +648,8 @@ def main():
     ap.add_argument("--emit-base-min-test", dest="emit_base_min", action="store_true",
                     help="Also emit a minimal-format test set for base model parsing (no think, simple system prompt).")
     ap.add_argument("--no-emit-base-min-test", dest="emit_base_min", action="store_false")
-    ap.add_argument("--emit-distill-copy", dest="emit_distill", action="store_true",
-                    help="Copy GRPO chat dataset to artifacts/distill/<type>_distill.jsonl for distillation.")
-    ap.add_argument("--no-emit-distill-copy", dest="emit_distill", action="store_false")
     ap.set_defaults(sft_with_think=True)
-    ap.set_defaults(emit_base_min=True, emit_distill=True)
+    ap.set_defaults(emit_base_min=True)
     args = ap.parse_args()
 
     t = args.type
@@ -719,12 +720,17 @@ def main():
     sft_test_out = Path("artifacts/test") / f"test_{t}.jsonl"
     grpo_out = Path("artifacts/grpo") / f"grpo_{t}.jsonl"
     base_min_out = Path("artifacts/test") / f"test_{t}_base_min.jsonl"
-    distill_out = Path("artifacts/distill") / f"{t}_distill.jsonl"
 
     system_prompt = _build_system_prompt(t)
 
     # 1) Build prompts for three splits
     print(f"[type-pipeline] building SFT prompts for {t} (<= {args.sft_end})")
+    market_df = None
+    try:
+        market_df = load_market_quarterly(Path("data/VIXCLS.csv"), Path("data/sp500_market_volume.csv"))
+    except Exception as e:
+        print(f"[type-pipeline] warn: failed to load market data for profile constraints: {e}")
+
     build_for_file(
         in_file=in_file,
         out_file=ph_sft_src,
@@ -746,6 +752,7 @@ def main():
         profile_dir=Path(args.profile_dir) if args.profile_dir else None,
         profile_weights_dir=Path(args.profile_weights_dir) if args.profile_weights_dir else None,
         random_sample=args.random_sample,
+        market_df=market_df,
     )
 
     print(f"[type-pipeline] building GRPO prompts for {t} ({args.grpo_start}..{args.grpo_end})")
@@ -770,6 +777,7 @@ def main():
         profile_dir=Path(args.profile_dir) if args.profile_dir else None,
         profile_weights_dir=Path(args.profile_weights_dir) if args.profile_weights_dir else None,
         random_sample=args.random_sample,
+        market_df=market_df,
     )
 
     print(f"[type-pipeline] building TEST prompts for {t} (>= {args.test_start})")
@@ -794,6 +802,7 @@ def main():
         profile_dir=Path(args.profile_dir) if args.profile_dir else None,
         profile_weights_dir=Path(args.profile_weights_dir) if args.profile_weights_dir else None,
         random_sample=args.random_sample,
+        market_df=market_df,
     )
 
     # 2) Convert
@@ -858,15 +867,6 @@ def main():
         progress_every=100,
         curr_only_prompt=args.prompt_curr_only,
     )
-
-    if args.emit_distill:
-        try:
-            distill_out.parent.mkdir(parents=True, exist_ok=True)
-            import shutil
-            shutil.copy(grpo_out, distill_out)
-            print(f"[type-pipeline] distill copy -> {distill_out}")
-        except Exception as e:
-            print(f"[type-pipeline] distill copy failed: {e}")
 
     # 3) Report stats
     stats_files = [

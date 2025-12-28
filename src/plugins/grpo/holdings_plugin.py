@@ -421,126 +421,127 @@ orms["huber_holdings"] = HuberHoldingsORM
 # ============================
 # Profile–Reasoning Alignment Reward
 # ============================
-class ProfileAlignmentORM(ORM):
+class ProfileNumericDeviationORM(ORM):
     """
-    Reward that enforces alignment between:
-      - profile objective weights (alpha / risk / tc)
-      - reasoning content inside <think>...</think>
+    Numeric profile deviation penalty (penalty-only, tail-only).
 
-    Intuition:
-      If a profile emphasizes transaction cost (tc),
-      the reasoning should mention cost / turnover / trading.
-      If a profile emphasizes risk,
-      the reasoning should mention risk / beta / volatility.
-      If a profile emphasizes alpha,
-      the reasoning should mention return / opportunity / fundamentals.
+    This reward enforces that predicted holding changes do NOT violate
+    the investor-type profile in extreme ways, but NEVER rewards matching
+    the profile mean.
 
-    Reward ∈ [-1, 1]
+    Profile definitions (consistent with profile construction):
+      risk_aversion ~ |ΔlogH| / VIX
+      herd_behavior ~ |ΔlogH| / ln(market_volume)
+
+    Reward <= 0.0 (penalty-only).
     """
-
-    # keyword lexicons (lightweight, extensible)
-    ALPHA_TERMS = [
-        "alpha", "return", "excess", "opportunity", "profit", "fundamental",
-        "growth", "valuation", "undervalued", "expected"
-    ]
-    RISK_TERMS = [
-        "risk", "beta", "volatility", "drawdown", "uncertainty",
-        "defensive", "stability", "exposure"
-    ]
-    TC_TERMS = [
-        "transaction", "cost", "turnover", "trading", "rebalance",
-        "liquidity", "friction"
-    ]
 
     def __call__(
         self,
         completions,
         objective_weights=None,
+        vix_q_prev=None,
+        ln_market_volume_q_prev=None,
+        profile_threshold=None,
         **kwargs
     ) -> List[float]:
         """
         Args:
-            completions: model outputs (strings)
+            completions: model outputs
             objective_weights: dict or list of dicts
                 {
-                  "alpha_w": float,
-                  "risk_w": float,
-                  "tc_w": float
+                  "risk_aversion": float,
+                  "herd_behavior": float,
+                  "profit_driven": float
                 }
+
+            vix_q_prev: float or list[float]
+                Mean VIX over [t-1 quarter, t quarter)
+
+            ln_market_volume_q_prev: float or list[float]
+                Mean log market volume over same window
+
+            profile_threshold: optional float or list[float]
+                Precomputed tail threshold S_q90[type].
+                If None, a conservative adaptive proxy is used.
+
+        Returns:
+            rewards: List[float] ≤ 0.0
         """
 
-        # broadcast weights if needed
+        # broadcast inputs
         if not isinstance(objective_weights, list):
             objective_weights = [objective_weights] * len(completions)
+        if not isinstance(vix_q_prev, list):
+            vix_q_prev = [vix_q_prev] * len(completions)
+        if not isinstance(ln_market_volume_q_prev, list):
+            ln_market_volume_q_prev = [ln_market_volume_q_prev] * len(completions)
+        if profile_threshold is not None and not isinstance(profile_threshold, list):
+            profile_threshold = [profile_threshold] * len(completions)
 
         rewards: List[float] = []
 
-        for comp, ow in zip(completions, objective_weights):
+        eps = float(kwargs.get("eps", 1e-9))
+        tol = float(kwargs.get("profile_tol", 0.35))   # band width
+        scale = float(kwargs.get("penalty_scale", 1.0))
+
+        for i, comp in enumerate(completions):
             try:
-                if comp is None or ow is None:
-                    rewards.append(-1.0)
-                    continue
-
-                # -------- extract <think> content --------
-                m = THINK_CONTENT_RE.search(comp)
-                if not m:
-                    rewards.append(-1.0)
-                    continue
-
-                think = m.group(1).lower()
-                if not think.strip():
-                    rewards.append(-1.0)
-                    continue
-
-                # -------- count keyword hits --------
-                def _count_hits(terms):
-                    return sum(1 for t in terms if t in think)
-
-                alpha_hits = _count_hits(self.ALPHA_TERMS)
-                risk_hits = _count_hits(self.RISK_TERMS)
-                tc_hits = _count_hits(self.TC_TERMS)
-
-                total_hits = alpha_hits + risk_hits + tc_hits
-                if total_hits == 0:
-                    # reasoning contains no economic content
-                    rewards.append(-0.5)
-                    continue
-
-                # normalize reasoning focus
-                alpha_frac = alpha_hits / total_hits
-                risk_frac = risk_hits / total_hits
-                tc_frac = tc_hits / total_hits
-
-                # -------- objective weights --------
-                w_alpha = float(ow.get("alpha_w", 0.0))
-                w_risk = float(ow.get("risk_w", 0.0))
-                w_tc = float(ow.get("tc_w", 0.0))
-
-                w_sum = w_alpha + w_risk + w_tc
-                if w_sum <= 0:
+                # -------- extract prediction --------
+                obj = _extract_json_from_answer(comp)
+                if not isinstance(obj, dict) or obj.get("holding_log_delta") is None:
                     rewards.append(0.0)
                     continue
 
-                w_alpha /= w_sum
-                w_risk /= w_sum
-                w_tc /= w_sum
+                delta_log = float(obj["holding_log_delta"])
+                if not math.isfinite(delta_log):
+                    rewards.append(0.0)
+                    continue
 
-                # -------- alignment score --------
-                alignment = (
-                    w_alpha * alpha_frac +
-                    w_risk * risk_frac +
-                    w_tc * tc_frac
-                )
+                abs_delta = abs(delta_log)
 
-                # map to [-1, 1]
-                reward = 2.0 * alignment - 1.0
-                rewards.append(float(reward))
+                # -------- market state --------
+                vix = max(abs(float(vix_q_prev[i])), eps)
+                volm = max(abs(float(ln_market_volume_q_prev[i])), eps)
+
+                # -------- profile weights --------
+                ow = objective_weights[i] or {}
+                w_risk = float(ow.get("risk_aversion", 0.0))
+                w_herd = float(ow.get("herd_behavior", 0.0))
+                # profit_driven deliberately excluded from numeric constraint
+
+                # -------- intensity measures (same as profile script) --------
+                risk_intensity = abs_delta / vix
+                herd_intensity = abs_delta / volm
+
+                # weighted intensity score
+                S = w_risk * risk_intensity + w_herd * herd_intensity
+
+                # -------- tail threshold --------
+                if profile_threshold is not None:
+                    base_th = float(profile_threshold[i])
+                else:
+                    # adaptive conservative proxy (safe default)
+                    base_th = (w_risk / vix + w_herd / volm)
+
+                upper = base_th * (1.0 + tol)
+
+                # -------- tail-only hinge penalty --------
+                if S <= upper:
+                    rewards.append(0.0)
+                else:
+                    penalty = -scale * (S - upper) ** 2
+                    rewards.append(float(penalty))
 
             except Exception:
-                rewards.append(-1.0)
+                rewards.append(0.0)
 
         return rewards
 
 
-# register for GRPO
-orms["profile_alignment"] = ProfileAlignmentORM
+
+
+orms["profile_numeric_deviation"] = ProfileNumericDeviationORM
+
+
+
