@@ -6,7 +6,6 @@ import numpy as np
 
 from src.prompts.sampler import _quarter_id, build_continuous_windows, stratified_sample_windows
 from src.prompts.builder import PromptRow, build_history_prompt
-from src.cli.compute_type_profiles import load_market_quarterly
 
 try:
     # Reuse mapping utilities if available
@@ -93,6 +92,49 @@ def _quarter_str_from_date(s: pd.Series) -> pd.Series:
 
 def _normalize_type(series: pd.Series) -> pd.Series:
     return series.astype(str).str.lower().str.replace(" ", "_")
+
+
+def _load_market_quarterly(vix_path: Path, vol_path: Path) -> pd.DataFrame:
+    """Lightweight copy of load_market_quarterly (daily -> prev-quarter mean)."""
+    def _read_with_date(path: Path) -> pd.DataFrame:
+        df = pd.read_csv(path)
+        cols_lower = {c.lower(): c for c in df.columns}
+        date_key = None
+        for key in ["date", "observation_date", "fdate"]:
+            if key in cols_lower:
+                date_key = cols_lower[key]
+                break
+        if date_key is None:
+            raise ValueError(f"{path} must contain a date column")
+        df[date_key] = pd.to_datetime(df[date_key])
+        df.columns = [c.lower() for c in df.columns]
+        return df.rename(columns={date_key.lower(): "date"})
+
+    vix = _read_with_date(vix_path)
+    vol = _read_with_date(vol_path)
+    if "vixcls" in vix.columns and "vix" not in vix.columns:
+        vix = vix.rename(columns={"vixcls": "vix"})
+    if "vix" not in vix.columns:
+        raise ValueError("VIX file must contain vix or vixcls")
+    if "ln_market_volume" not in vol.columns:
+        raise ValueError("Volume file must contain ln_market_volume")
+
+    def to_qstart(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["quarter_start"] = pd.PeriodIndex(df["date"], freq="Q").to_timestamp(how="start")
+        return df
+
+    vix = to_qstart(vix)
+    vol = to_qstart(vol)
+    vix_q = vix.groupby("quarter_start", as_index=False)["vix"].mean()
+    vol_q = vol.groupby("quarter_start", as_index=False)["ln_market_volume"].mean()
+
+    shift = pd.offsets.QuarterBegin(startingMonth=1)
+    vix_q["date"] = vix_q["quarter_start"] + shift
+    vol_q["date"] = vol_q["quarter_start"] + shift
+
+    market = vix_q.merge(vol_q, on="date", how="outer")
+    return market[["date", "vix", "ln_market_volume"]]
 
 
 def _merge_profile_info(
@@ -439,7 +481,7 @@ def main():
     total = 0
     market_df = None
     try:
-        market_df = load_market_quarterly(Path(args.vix_path), Path(args.volume_path))
+        market_df = _load_market_quarterly(Path(args.vix_path), Path(args.volume_path))
     except Exception as e:
         print(f"[history-prompts] warn: failed to load market data: {e}")
     # Load ticker mapping automatically if available

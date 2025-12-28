@@ -9,7 +9,17 @@ import re
 
 from src.cli.build_history_prompts import build_for_file
 from src.cli.prompts_to_sft import _build_auto_think
-from src.cli.compute_type_profiles import load_market_quarterly
+
+def _load_market_quarterly_safe():
+    try:
+        from src.cli.build_history_prompts import _load_market_quarterly
+    except Exception:
+        return None
+    try:
+        return _load_market_quarterly(Path("data/VIXCLS.csv"), Path("data/sp500_market_volume.csv"))
+    except Exception as e:
+        print(f"[type-pipeline] warn: failed to load market data for profile constraints: {e}")
+        return None
 
 try:
     from src.cli.map_ticker_names import load_mapping  # type: ignore
@@ -725,11 +735,7 @@ def main():
 
     # 1) Build prompts for three splits
     print(f"[type-pipeline] building SFT prompts for {t} (<= {args.sft_end})")
-    market_df = None
-    try:
-        market_df = load_market_quarterly(Path("data/VIXCLS.csv"), Path("data/sp500_market_volume.csv"))
-    except Exception as e:
-        print(f"[type-pipeline] warn: failed to load market data for profile constraints: {e}")
+    market_df = _load_market_quarterly_safe()
 
     build_for_file(
         in_file=in_file,
