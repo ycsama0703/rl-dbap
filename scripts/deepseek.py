@@ -20,17 +20,18 @@ if not API_KEY:
 GENERATOR_PROMPT = """
 You are an experienced quantitative portfolio manager.
 
-Given the historical fundamentals and the latest observation of a company,
-reason numerically about how the holdings should change. Present the thinking
-inside a <think> block, then provide the predicted holding_log_delta inside the
-<answer> block.
+Input provides: manager type, profile weights (risk_aversion / herd_behavior / profit_driven), panel features, and the target holding_log_delta.
+Your task: explain qualitatively why this type would make that holding change given the profile and features.
 
 Strict output contract:
-1) The <think> block must contain 3-5 concise sentences referencing t-1→t
-   changes for me, be, profit, Gat, beta, plus any portfolio constraints.
+1) <think>: 3-5 concise sentences. Use profile weights as “preferences” and link them to the provided features.
+   - Do NOT reveal or restate any numeric targets (holding_log_delta) or raw input numbers.
+   - Keep it qualitative (e.g., sign/magnitude reasoning), no exact values.
+   - Add one profile-exclusive constraint sentence (e.g., how the weights dampen aggressive moves).
 2) Immediately after </think>, emit:
    <answer>{{"holding_log_delta": <float>}}</answer>
-   - The float must be finite, with up to 6 decimals, no scientific notation.
+   - The float must be finite, up to 6 decimals, no scientific notation.
+   - Use the target provided in the input; do not invent a new value.
 3) Output nothing beyond these two blocks; stop right after </answer>.
 
 Input prompt:
@@ -95,4 +96,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

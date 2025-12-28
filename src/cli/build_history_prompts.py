@@ -20,8 +20,21 @@ def _row_from_dfrow(r: pd.Series) -> PromptRow:
         mgrno=r.get("mgrno"),
         permno=r.get("permno"),
         investor_type=(r.get("type") or "Unknown"),
+        profile_k=r.get("profile_k") if "profile_k" in r.index else None,
+        prev_profile_k=r.get("prev_profile_k") if "prev_profile_k" in r.index else None,
+        objective_weights=(
+            {
+                "alpha_w": r.get("alpha_w"),
+                "risk_w": r.get("risk_w"),
+                "tc_w": r.get("tc_w"),
+                "te_w": r.get("te_w"),
+            }
+            if {"alpha_w", "risk_w", "tc_w", "te_w"}.issubset(set(r.index))
+            else None
+        ),
         holding_t=r.get("holding_t"),
         holding_t1=r.get("holding_t1"),
+        shares=r.get("shares"),
         me=r.get("me") or r.get("factor1"),
         be=r.get("be") or r.get("factor2"),
         profit=r.get("profit") or r.get("factor3"),
@@ -54,36 +67,6 @@ REQUIRED_COLS = [
     "me", "be", "profit", "Gat", "beta", "aum", "outaum", "prc"
 ]
 
-_SP500_WEIGHTS = None
-
-
-def _load_sp500_weights(path: Path = Path("data/sp500_with_weights.csv")) -> pd.DataFrame | None:
-    """Load SP500 weights once and cache. Returns None if file missing/unreadable."""
-    global _SP500_WEIGHTS
-    if _SP500_WEIGHTS is not None:
-        return _SP500_WEIGHTS
-    if not path.exists():
-        print(f"[history-prompts] sp500 weights missing: {path}")
-        _SP500_WEIGHTS = None
-        return None
-    try:
-        w = pd.read_csv(path, parse_dates=["quarter_date"])
-        if not {"PERMNO", "quarter_date", "weight"}.issubset(w.columns):
-            print(f"[history-prompts] sp500 weights missing required columns in {path}")
-            _SP500_WEIGHTS = None
-            return None
-        w = w.rename(columns={"PERMNO": "permno"})
-        w["permno"] = w["permno"].astype(int)
-        # Align quarter id with _quarter_id: year*4 + quarter
-        q = w["quarter_date"]
-        w["qid"] = q.dt.year * 4 + q.dt.quarter
-        w = w[["permno", "qid", "weight"]].rename(columns={"weight": "sp500_weight"})
-        _SP500_WEIGHTS = w
-    except Exception as e:
-        print(f"[history-prompts] failed to load sp500 weights: {e}")
-        _SP500_WEIGHTS = None
-    return _SP500_WEIGHTS
-
 
 def _read_min_columns(fp: Path) -> pd.DataFrame:
     # Try to read a subset of columns to save memory; fallback to full read if not supported
@@ -95,6 +78,102 @@ def _read_min_columns(fp: Path) -> pd.DataFrame:
             return pd.read_parquet(fp, columns=[c for c in REQUIRED_COLS if True])
     except Exception:
         return pd.read_parquet(fp)
+
+
+def _quarter_str_from_date(s: pd.Series) -> pd.Series:
+    """Convert datetime series to 'YYYYQX' string."""
+    try:
+        # drop timezone if present
+        s = pd.to_datetime(s).dt.tz_localize(None)
+    except Exception:
+        s = pd.to_datetime(s, errors="coerce")
+    return pd.PeriodIndex(s, freq="Q").astype(str)
+
+
+def _normalize_type(series: pd.Series) -> pd.Series:
+    return series.astype(str).str.lower().str.replace(" ", "_")
+
+
+def _merge_profile_info(
+    df: pd.DataFrame,
+    *,
+    type_stem: str,
+    profile_dir: Path | None,
+    weights_dir: Path | None,
+) -> pd.DataFrame:
+    """Attach profile_k / prev_profile_k (and optional objective weights) to df."""
+    if profile_dir is None:
+        return df
+    prof_path = None
+    candidates = [
+        profile_dir / f"{type_stem}_iq_profile.parquet",
+        profile_dir / f"{type_stem}_iq_profile.csv",
+        profile_dir / f"{type_stem}.parquet",
+        profile_dir / f"{type_stem}.csv",
+    ]
+    for c in candidates:
+        if c.exists():
+            prof_path = c
+            break
+    if prof_path is None:
+        return df
+
+    try:
+        prof = pd.read_parquet(prof_path) if prof_path.suffix.lower() != ".csv" else pd.read_csv(prof_path)
+    except Exception:
+        return df
+
+    # Normalize columns
+    inv_col = "mgrno" if "mgrno" in prof.columns else ("investor_id" if "investor_id" in prof.columns else None)
+    if inv_col is None or "quarter" not in prof.columns:
+        return df
+    typ_col = "type" if "type" in prof.columns else ("investor_type" if "investor_type" in prof.columns else None)
+    if typ_col is None:
+        prof["type"] = type_stem
+        typ_col = "type"
+
+    prof = prof.copy()
+    prof["__type_norm"] = _normalize_type(prof[typ_col])
+    prof["__quarter_str"] = _quarter_str_from_date(prof["quarter"])
+    prof = prof.rename(columns={inv_col: "mgrno"})
+    prof = prof[["mgrno", "__quarter_str", "__type_norm", "profile_k"]].drop_duplicates()
+
+    df = df.copy()
+    df["__type_norm"] = _normalize_type(df["type"])
+    df["__quarter_str"] = _quarter_str_from_date(df["date"])
+    df = df.merge(
+        prof,
+        how="left",
+        on=["mgrno", "__quarter_str", "__type_norm"],
+    )
+
+    # prev_profile_k within investor (type, mgrno) sorted by date
+    df = df.sort_values(["type", "mgrno", "date"])
+    df["prev_profile_k"] = df.groupby(["type", "mgrno"], sort=False)["profile_k"].shift()
+
+    # Optional objective weights
+    if weights_dir is not None:
+        w_path = None
+        w_cands = [
+            weights_dir / f"{type_stem}_profile_objective_weights.parquet",
+            weights_dir / f"{type_stem}_profile_objective_weights.csv",
+        ]
+        for c in w_cands:
+            if c.exists():
+                w_path = c
+                break
+        if w_path is not None:
+            try:
+                wdf = pd.read_parquet(w_path) if w_path.suffix.lower() != ".csv" else pd.read_csv(w_path)
+                w_typ = "investor_type" if "investor_type" in wdf.columns else "type"
+                wdf["__type_norm"] = _normalize_type(wdf[w_typ])
+                wdf = wdf.rename(columns={"profile_k": "profile_k", "alpha_w": "alpha_w", "risk_w": "risk_w", "tc_w": "tc_w", "te_w": "te_w"})
+                wdf = wdf[["__type_norm", "profile_k", "alpha_w", "risk_w", "tc_w", "te_w"]]
+                df = df.merge(wdf, how="left", on=["__type_norm", "profile_k"])
+            except Exception:
+                pass
+
+    return df
 
 
 def build_for_file(
@@ -116,6 +195,9 @@ def build_for_file(
     include_permnos: set[int] | None = None,
     take_all: bool = False,
     limit_override: int | None = None,
+    profile_dir: Path | None = None,
+    profile_weights_dir: Path | None = None,
+    random_sample: bool = False,
 ):
     t0 = time.perf_counter()
     print(f"[history-prompts] reading: {in_file}", flush=True)
@@ -142,16 +224,17 @@ def build_for_file(
     if head is not None and head > 0:
         # Keep head after sorting for deterministic subset
         df = df.sort_values(["type", "mgrno", "permno", "date"]).head(head)
-    # Merge SP500 weights by (permno, quarter) so the feature flows through sampling/prompts
-    weights = _load_sp500_weights()
-    if weights is not None:
-        try:
-            df = df.assign(__qid=_quarter_id(df["date"]))
-            df = df.merge(weights, how="left", left_on=["permno", "__qid"], right_on=["permno", "qid"])
-            df = df.drop(columns=["qid", "__qid"], errors="ignore")
-        except Exception as e:
-            df = df.drop(columns=["__qid"], errors="ignore")
-            print(f"[history-prompts] warning: failed to merge sp500 weights: {e}")
+    # Attach profile labels / prev_profile if available
+    try:
+        df = _merge_profile_info(
+            df,
+            type_stem=in_file.stem,
+            profile_dir=profile_dir,
+            weights_dir=profile_weights_dir,
+        )
+    except Exception as e:
+        print(f"[history-prompts] warning: failed to merge profiles: {e}")
+
     # create windows and sample
     print(f"[history-prompts] building windows...", flush=True)
     windows = build_continuous_windows(
@@ -193,6 +276,14 @@ def build_for_file(
             f"[history-prompts] {in_file.stem}: selected {len(picked):,} / {total_before:,} windows (no sampling)",
             flush=True,
         )
+    elif random_sample:
+        rng = np.random.default_rng(seed)
+        pool = _nonzero_window(windows)
+        rng.shuffle(pool)
+        total_before = len(pool)
+        lim = per_type_limit if limit_override is None else max(0, int(limit_override))
+        picked = pool[:lim]
+        print(f"[history-prompts] {in_file.stem}: random sampled={len(picked):,} / {total_before:,} (limit={lim})", flush=True)
     else:
         picked = stratified_sample_windows(
             df,
@@ -246,6 +337,31 @@ def build_for_file(
                     extras["ticker"] = ticker
                 if name:
                     extras["company"] = name
+            # attach profile info if available
+            try:
+                cur_row = df.loc[w.idx_t]
+                if "profile_k" in cur_row:
+                    pk = cur_row.get("profile_k")
+                    if pd.notna(pk):
+                        extras["profile_k"] = int(pk)
+                if "prev_profile_k" in cur_row:
+                    pp = cur_row.get("prev_profile_k")
+                    if pd.notna(pp):
+                        extras["prev_profile_k"] = int(pp)
+                if {"alpha_w", "risk_w", "tc_w", "te_w"}.issubset(df.columns):
+                    aw = cur_row.get("alpha_w")
+                    rw = cur_row.get("risk_w")
+                    tw = cur_row.get("tc_w")
+                    te = cur_row.get("te_w")
+                    if not all(pd.isna([aw, rw, tw, te])):
+                        extras["objective_weights"] = {
+                            "alpha_w": None if pd.isna(aw) else float(aw),
+                            "risk_w": None if pd.isna(rw) else float(rw),
+                            "tc_w": None if pd.isna(tw) else float(tw),
+                            "te_w": None if pd.isna(te) else float(te),
+                        }
+            except Exception:
+                pass
             rec = {"prompt": prompt, **extras}
             # Ensure numpy scalars are converted to Python types for JSON serialization
             def _json_default(o):
@@ -296,6 +412,9 @@ def main():
     ap.add_argument("--progress-every", type=int, default=2000, help="Print progress every N writes if no tqdm")
     ap.add_argument("--use-tqdm", action="store_true", help="Use tqdm progress bars if installed")
     ap.add_argument("--exclude-zero-holding-t", action="store_true", help="Exclude windows where t-time holding_t == 0")
+    ap.add_argument("--profile-dir", type=str, default=None, help="Directory with *_iq_profile.(csv|parquet) per type (optional)")
+    ap.add_argument("--profile-weights-dir", type=str, default=None, help="Directory with *_profile_objective_weights.(csv|parquet) (optional)")
+    ap.add_argument("--random-sample", action="store_true", help="Use simple random sampling (shuffled) instead of stratified sampling.")
     args = ap.parse_args()
 
     in_dir = Path(args.in_dir)
@@ -340,6 +459,9 @@ def main():
             use_tqdm=args.use_tqdm,
             mapping=mp,
             exclude_zero_holding_t=args.exclude_zero_holding_t,
+            profile_dir=Path(args.profile_dir) if args.profile_dir else None,
+            profile_weights_dir=Path(args.profile_weights_dir) if args.profile_weights_dir else None,
+            random_sample=args.random_sample,
         )
         print(f"[history-prompts] {fp.stem}: wrote {n} -> {outp}")
         total += n

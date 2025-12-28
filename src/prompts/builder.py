@@ -10,9 +10,14 @@ class PromptRow:
     mgrno: str | int
     permno: str | int
     investor_type: str
-    # current t snapshot
+    # current t snapshot (required)
     holding_t: Optional[float]
     holding_t1: Optional[float]
+    # optional profile info
+    profile_k: Optional[int] = None
+    prev_profile_k: Optional[int] = None
+    objective_weights: Optional[dict] = None
+    shares: Optional[float] = None
     me: Optional[float] = None
     be: Optional[float] = None
     profit: Optional[float] = None
@@ -158,11 +163,14 @@ def build_history_prompt(
     if strict_contract:
         instructions = (
             "OUTPUT FORMAT & REASONING GUIDE\n\n"
-            "1. Begin with a single reasoning block enclosed in <think>...</think>. Keep concise (≤ 3 sentences).\n"
-            "2. Then output a single <answer>...</answer> block with exactly one JSON object: "
-            '{"holding_delta": <float>}.\n'
-            "3. The float must have 2 decimal places, no scientific notation.\n"
-            "The final output should look EXACTLY like this example (structure only):\n\n"
+            "Return exactly three blocks in order:\n"
+            "1) <profile>{\"profile_k\": <int>}</profile>\n"
+            "2) <think>...profile-aligned reasoning (≤3 sentences)...</think>\n"
+            "3) <answer>{\"holding_log_delta\": <float with 2 decimals>}</answer>\n"
+            "Use log change: holding_log_delta = log((holding_tp1 + "
+            f"{LOG_EPS:.0e}) / (holding_t + {LOG_EPS:.0e})).\n\n"
+            "Example (structure only):\n"
+            "<profile>{\"profile_k\": 2}</profile>\n"
             "<think>...</think>\n"
             "<answer>{\"holding_log_delta\": 0.00}</answer>\n\n"
         )
@@ -183,8 +191,12 @@ def build_history_prompt(
         "mgrno": mgrno,
         "permno": permno,
         "holding_t": r_t.holding_t,
+        "shares": r_t.shares,
         "label_tp1": (float(r_t.holding_t1) if r_t.holding_t1 is not None and not pd.isna(r_t.holding_t1) else None),
         "date": r_t.date,
+        "label_profile_k": r_t.profile_k,
+        "label_prev_profile_k": r_t.prev_profile_k,
+        "objective_weights": r_t.objective_weights,
         "label_delta": None,
         "label_log_delta": None,
         "label_delta_absolute": None,

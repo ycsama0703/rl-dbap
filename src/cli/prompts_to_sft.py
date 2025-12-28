@@ -173,10 +173,12 @@ def main():
                     if not prompt:
                         continue
                     label_val = resolver(rec)
-                    if label_val is None:
+                    profile_val = rec.get("label_profile_k") or rec.get("profile_k")
+                    if label_val is None or profile_val is None:
                         continue  # skip if required label missing
                     value = _format_float(float(label_val), args.decimals)
                     resp = json.dumps({answer_key: value}, ensure_ascii=False)
+                    profile_msg = f"<profile>{{\"profile_k\": {int(profile_val)}}}</profile>"
 
                     msgs = [
                         {"role": "system", "content": args.system},
@@ -184,6 +186,8 @@ def main():
                     ]
 
                     assistant_msgs = []
+                    # profile block (supervised)
+                    assistant_msgs.append({"role": "assistant", "content": profile_msg, "loss": True})
                     if args.with_think:
                         think_text = args.think_template.strip()
                         if not think_text:
@@ -192,7 +196,7 @@ def main():
                             think_lower = think_text.lower()
                             if not think_lower.startswith("<think>"):
                                 think_text = f"<think>{think_text}</think>"
-                            assistant_msgs.append({"role": "assistant", "content": think_text, "loss": False})
+                            assistant_msgs.append({"role": "assistant", "content": think_text, "loss": True})
                     assistant_msgs.append({"role": "assistant", "content": f"<answer>{resp}</answer>", "loss": True})
 
                     out = {"messages": msgs + assistant_msgs}

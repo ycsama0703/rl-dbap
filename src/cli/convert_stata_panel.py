@@ -27,6 +27,16 @@ TYPE_MAP = {
     "other": "other",
 }
 
+# Some sources encode type as small integers. Map the observed codes here; fall back to stringified code.
+NUMERIC_TYPE_MAP = {
+    0: "households",
+    1: "banks",
+    2: "insurance_companies",
+    3: "investment_advisors",
+    4: "mutual_funds",
+    5: "pension_funds",
+    6: "other",
+}
 OUTPUT_COLUMNS = [
     "type",
     "mgrno",
@@ -82,8 +92,14 @@ def _maybe_import_pyarrow():
 def _normalize_type(raw: object) -> Optional[str]:
     if raw is None:
         return None
-    if isinstance(raw, (int, float)) and pd.isna(raw):
-        return None
+    if isinstance(raw, (int, float)):
+        if pd.isna(raw):
+            return None
+        # Handle known numeric encodings
+        mapped_num = NUMERIC_TYPE_MAP.get(int(raw))
+        if mapped_num:
+            return mapped_num
+        return str(int(raw))
     s = str(raw).strip()
     if not s:
         return None

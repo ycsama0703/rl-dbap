@@ -1,186 +1,226 @@
 #!/usr/bin/env python
 """
-Stage 3: Estimate per-profile objective weights (alpha / risk / tc / te).
+Compute profile-level objective weights using holding_log_delta and market aggregates.
 
-Steps:
-1) Compute portfolio weights w(j,t,s) from holdings (mv if price exists else holding share).
-2) Compute delta_w = w_t - w_{t-1} per (investor, permno, quarter).
-3) Define proxies:
-   - alpha_proxy: profit (fallback Gat, then be)
-   - risk_proxy: beta
-   - tc_proxy: 1 / me (size proxy), clipped finite
-   - te_proxy: abs(w_{t-1} - spx_weight)
-4) For each (investor_type, profile_k), run ridge regression:
-   delta_w ~ a*alpha - b*risk - c*tc - d*te (fit without intercept)
-   clip coefficients to non-negative, then normalize to sum to 1.
-5) Save table profile_objective_weights.
+New definitions (per profile_k within investor_type):
+  - risk_aversion_score   = |holding_log_delta| / max(vix_qtr_prev_mean, eps)
+  - herd_behavior_score   = |holding_log_delta| / max(market_volume_qtr_prev_mean, eps)
+                            (market_volume_qtr_prev_mean = exp(ln_vol_qtr_prev_mean) if ln provided)
+  - profit_driven_score   = |holding_log_delta| / max(profit, eps)
+
+Weights are the normalized mean scores (with a small floor to avoid degeneracy):
+  w_i = max(mean_score_i, min_weight)
+  weights = w_i / sum_i w_i
+
+Inputs:
+  --holdings : panel parquet/csv with columns including holding, profit, vix_qtr_prev_mean,
+               ln_vol_qtr_prev_mean (or volume column) and date/quarter.
+               Should include all investor types (no whitelist filtering).
+  --profiles : profile assignments with mgrno + quarter + profile_k (per investor_type).
+  --out-path : where to write the resulting weights (csv or parquet).
+
+The script joins holdings with profiles on (mgrno, quarter), computes holding_log_delta
+within (mgrno, permno) over time, then aggregates scores by investor_type + profile_k.
 """
+
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
-from typing import List, Tuple
+from typing import Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import Ridge
 
 
-def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="Estimate objective weights per (investor_type, profile_k).")
-    ap.add_argument("--holdings", required=True, help="Parquet/CSV with stock-level holdings.")
-    ap.add_argument("--profiles", required=True, help="Parquet/CSV with investor_quarter_profile (profile_k).")
-    ap.add_argument("--out-path", required=True, help="Output parquet/csv for profile_objective_weights.")
-    ap.add_argument("--investor-col", default="mgrno")
-    ap.add_argument("--stock-col", default="permno")
-    ap.add_argument("--date-col", default="date")
-    ap.add_argument("--type-col", default="type")
-    ap.add_argument("--holding-col", default="holding")
-    ap.add_argument("--price-col", default="price")
-    ap.add_argument("--ridge-alpha", type=float, default=1.0, help="Ridge regularization strength.")
-    return ap.parse_args()
+def to_quarter(col: pd.Series) -> pd.Series:
+    """Convert a date/quarter-like column to string quarter 'YYYYQn'."""
+    if col.dtype == object and col.str.contains("Q").any():
+        return col.astype(str)
+    # fallback: parse datetime then to quarter
+    dt = pd.to_datetime(col)
+    return pd.PeriodIndex(dt, freq="Q").astype(str)
 
 
-def load_table(path: str) -> pd.DataFrame:
-    if path.endswith(".csv"):
+def load_table(path: Path) -> pd.DataFrame:
+    if path.suffix.lower() == ".csv":
         return pd.read_csv(path)
     return pd.read_parquet(path)
 
 
-def save_table(df: pd.DataFrame, path: str):
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    if path.endswith(".csv"):
-        df.to_csv(path, index=False)
-    else:
-        df.to_parquet(path, index=False)
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--holdings", required=True, help="Panel holdings file (parquet/csv)")
+    ap.add_argument(
+        "--profiles",
+        required=False,
+        default=None,
+        help="Optional profile assignments with profile_k; if omitted, aggregate per investor_type only",
+    )
+    ap.add_argument(
+        "--group-by-profile",
+        action="store_true",
+        default=False,
+        help="If set, aggregate by investor_type + profile_k; otherwise by investor_type only",
+    )
+    ap.add_argument("--out-path", required=True, help="Output path (csv or parquet)")
+    ap.add_argument("--inv-col", default="mgrno")
+    ap.add_argument("--permno-col", default="permno")
+    ap.add_argument("--date-col", default="date", help="Date or quarter column")
+    ap.add_argument("--quarter-col", default="quarter", help="Quarter column name after conversion")
+    ap.add_argument("--type-col", default="type")
+    ap.add_argument("--holding-col", default="holding", help="Holding at time t")
+    ap.add_argument("--profit-col", default="profit")
+    ap.add_argument("--vix-col", default="vix_qtr_prev_mean")
+    ap.add_argument("--ln-vol-col", default="ln_vol_qtr_prev_mean")
+    ap.add_argument("--vol-col", default=None, help="Optional volume column (if ln-vol not present)")
+    ap.add_argument("--eps", type=float, default=1e-6)
+    ap.add_argument("--min-weight", type=float, default=1e-3)
+    args = ap.parse_args()
 
+    hold_path = Path(args.holdings)
+    prof_path = Path(args.profiles) if args.profiles else None
+    out_path = Path(args.out_path)
 
-def compute_weights(df: pd.DataFrame, inv: str, qtr: str, hold: str, price: str) -> pd.DataFrame:
-    df["_mv"] = df[hold] * df[price]
-    def _w(g: pd.DataFrame) -> pd.DataFrame:
-        if g["_mv"].notna().any():
-            denom = g["_mv"].sum()
-            g["w"] = g["_mv"] / denom if denom != 0 else 0.0
-        else:
-            denom = g[hold].sum()
-            g["w"] = g[hold] / denom if denom != 0 else 0.0
-        return g
-    return df.groupby([inv, qtr], group_keys=False).apply(_w)
+    df = load_table(hold_path)
+    prof = load_table(prof_path) if prof_path else None
 
-
-def add_prev_weight(df_w: pd.DataFrame, inv: str, stock: str, qtr: str) -> pd.DataFrame:
-    df_w = df_w.sort_values([inv, stock, qtr])
-    df_w["w_prev"] = df_w.groupby([inv, stock])["w"].shift(1)
-    return df_w
-
-
-def pick_alpha_proxy(df: pd.DataFrame) -> pd.Series:
-    if "profit" in df.columns:
-        return df["profit"]
-    if "Gat" in df.columns:
-        return df["Gat"]
-    if "be" in df.columns:
-        return df["be"]
-    return pd.Series(np.nan, index=df.index)
-
-
-def main() -> None:
-    args = parse_args()
-    inv, stock, date = args.investor_col, args.stock_col, args.date_col
+    inv = args.inv_col
+    perm = args.permno_col
+    date_col = args.date_col
+    qcol = args.quarter_col
     typ = args.type_col
-    hold, price = args.holding_col, args.price_col
+    hold_col = args.holding_col
+    profit_col = args.profit_col
+    vix_col = args.vix_col
+    ln_vol_col = args.ln_vol_col
+    vol_col = args.vol_col
+    eps = args.eps
+    min_w = args.min_weight
 
-    df = load_table(args.holdings)
-    prof = load_table(args.profiles)
+    # Normalize column names/types
+    for c in [inv, perm]:
+        if c in df.columns:
+            df[c] = df[c].astype(str)
+        if prof is not None and c in prof.columns:
+            prof[c] = prof[c].astype(str)
 
-    # normalize type
+    if qcol not in df.columns:
+        df[qcol] = to_quarter(df[date_col])
+    if prof is not None and qcol not in prof.columns:
+        prof[qcol] = to_quarter(prof[date_col])
+
+    # investor type to lower
+    def _norm_type(series: pd.Series) -> pd.Series:
+        return series.astype(str).str.strip().str.lower().str.replace(" ", "_")
+
     if typ in df.columns:
-        df[typ] = (
-            df[typ]
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .str.replace(r"\s+", "_", regex=True)
-        )
-    if typ in prof.columns:
-        prof[typ] = (
-            prof[typ]
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .str.replace(r"\s+", "_", regex=True)
-        )
+        df[typ] = _norm_type(df[typ])
+    if prof is not None and typ in prof.columns:
+        prof[typ] = _norm_type(prof[typ])
 
-    # ensure date->quarter string
-    df[date] = pd.to_datetime(df[date])
-    df["quarter"] = df[date].dt.to_period("Q").astype(str)
+    # compute holding_log_delta within (inv, perm)
+    df = df.sort_values([inv, perm, qcol])
+    df["holding_prev"] = df.groupby([inv, perm])[hold_col].shift(1)
+    df["holding_log_delta"] = np.log((df[hold_col] + eps) / (df["holding_prev"] + eps))
 
-    # compute weights and previous weights
-    df = compute_weights(df, inv, "quarter", hold, price)
-    df = add_prev_weight(df, inv, stock, "quarter")
-    df["delta_w"] = df["w"] - df["w_prev"]
-
-    # proxies
-    df["alpha_proxy"] = pick_alpha_proxy(df)
-    df["risk_proxy"] = df["beta"] if "beta" in df.columns else np.nan
-    df["tc_proxy"] = np.where(df.get("me") is not None, 1.0 / df["me"].replace(0, np.nan), np.nan)
-    # treat inf as nan
-    df.loc[~np.isfinite(df["tc_proxy"]), "tc_proxy"] = np.nan
-    if "spx_weight" in df.columns:
-        df["te_proxy"] = (df["w_prev"] - df["spx_weight"]).abs()
+    # Merge profiles (optional)
+    merged = df
+    if prof is not None and args.group_by_profile:
+        prof_use = prof[[inv, qcol, "profile_k", typ]].dropna(subset=["profile_k"]).copy()
+        prof_use["profile_k"] = prof_use["profile_k"].astype(int)
+        merged = df.merge(prof_use, on=[inv, qcol], how="inner", suffixes=("", "_prof"))
+        # Resolve investor type column (prefer merged typ from profiles if present)
+        if f"{typ}_prof" in merged.columns:
+            merged[typ] = merged[f"{typ}_prof"]
     else:
-        df["te_proxy"] = np.nan
+        # If no profile merge, fabricate a single profile_k=0 to keep downstream code simple
+        merged = merged.copy()
+        merged["profile_k"] = 0
 
-    # merge profile_k onto (inv, quarter)
-    # avoid suffix clash if type also exists in holdings
-    prof = prof[[inv, "quarter", "profile_k", typ]].drop_duplicates()
-    df = df.merge(prof, on=[inv, "quarter"], how="inner", suffixes=("", "_prof"))
-    # prefer profile type if duplicated
-    if f"{typ}_prof" in df.columns:
-        df[typ] = df[f"{typ}_prof"]
-        df = df.drop(columns=[c for c in df.columns if c.endswith("_prof")])
+    # Drop rows missing needed inputs
+    needed_cols = [profit_col, "holding_prev", "holding_log_delta"]
+    if vix_col in merged.columns:
+        needed_cols.append(vix_col)
+    else:
+        raise ValueError(f"Missing required column: {vix_col}")
 
-    # keep rows with prev weights (need delta)
-    df_use = df[df["w_prev"].notna()].copy()
-    # fill missing proxies with 0 to avoid dropping all rows
-    for col in ["alpha_proxy", "risk_proxy", "tc_proxy", "te_proxy"]:
-        df_use[col] = df_use[col].fillna(0.0)
-    df_use = df_use[df_use["delta_w"].notna()]
+    volume_series: Optional[pd.Series] = None
+    if ln_vol_col and ln_vol_col in merged.columns:
+        volume_series = np.exp(merged[ln_vol_col].astype(float))
+    elif vol_col and vol_col in merged.columns:
+        volume_series = merged[vol_col].astype(float)
+    else:
+        raise ValueError("Missing volume proxy: provide --ln-vol-col or --vol-col present in data.")
 
-    results = []
-    for (tval, pk), g in df_use.groupby([typ, "profile_k"]):
-        X = g[["alpha_proxy", "risk_proxy", "tc_proxy", "te_proxy"]].to_numpy(dtype=np.float64)
-        y = g["delta_w"].to_numpy(dtype=np.float64)
-        if len(y) < 10 or np.allclose(y, 0):
-            w = np.array([0.0, 0.0, 0.0, 0.0])
-        else:
-            model = Ridge(alpha=args.ridge_alpha, fit_intercept=False)
-            model.fit(X, y)
-            coefs = model.coef_
-            # map to positive weights: alpha (+), risk (-), tc (-), te (-)
-            alpha_w = max(coefs[0], 0)
-            risk_w = max(-coefs[1], 0)
-            tc_w = max(-coefs[2], 0)
-            te_w = max(-coefs[3], 0)
-            w = np.array([alpha_w, risk_w, tc_w, te_w], dtype=np.float64)
-        s = w.sum()
-        if s > 0:
-            w = w / s
-        results.append(
-            {
-                "investor_type": tval,
-                "profile_k": pk,
-                "alpha_w": w[0],
-                "risk_w": w[1],
-                "tc_w": w[2],
-                "te_w": w[3],
-                "n_obs": len(g),
-            }
-        )
+    merged = merged.dropna(subset=needed_cols)
+    merged = merged.loc[merged[profit_col].notna() & volume_series.notna()]
+    merged = merged.copy()
+    merged["market_volume"] = volume_series
 
-    out_df = pd.DataFrame(results)
-    save_table(out_df, args.out_path)
-    print(f"[ok] wrote {len(out_df)} rows -> {args.out_path}")
+    # Raw scores
+    merged["risk_aversion_score"] = merged["holding_log_delta"].abs() / np.maximum(merged[vix_col], eps)
+    merged["herd_behavior_score"] = merged["holding_log_delta"].abs() / np.maximum(merged["market_volume"], eps)
+    merged["profit_driven_score"] = merged["holding_log_delta"].abs() / np.maximum(merged[profit_col], eps)
+
+    # Winsorize(1%,99%) + scale (no centering) within investor_type for comparability
+    for col in ["risk_aversion_score", "herd_behavior_score", "profit_driven_score"]:
+        def _clip_scale_series(s: pd.Series) -> pd.Series:
+            q1 = s.quantile(0.01)
+            q99 = s.quantile(0.99)
+            clipped = s.clip(lower=q1, upper=q99)
+            std = clipped.std()
+            std = std if std and std > eps else 1.0
+            return clipped / std  # avoid centering to preserve mean differences
+
+        merged[col] = merged.groupby(typ)[col].transform(_clip_scale_series)
+
+    group_cols = [typ]
+    if args.group_by_profile:
+        group_cols.append("profile_k")
+    else:
+        merged["profile_k"] = 0  # ensure column exists but grouping only by type
+
+    grp = merged.groupby(group_cols)
+    agg = grp[["risk_aversion_score", "herd_behavior_score", "profit_driven_score"]].mean().reset_index()
+    agg["n_obs"] = grp.size().values
+    if not args.group_by_profile:
+        agg["profile_k"] = 0
+
+    # Apply floor and normalize to weights (shift to be positive)
+    for col in ["risk_aversion_score", "herd_behavior_score", "profit_driven_score"]:
+        agg[col] = agg[col].fillna(0.0)
+    # shift each score column so the minimum is >= min_w
+    for col in ["risk_aversion_score", "herd_behavior_score", "profit_driven_score"]:
+        min_val = agg[col].min()
+        agg[col] = agg[col] - min_val + min_w
+
+    agg["score_sum"] = agg[["risk_aversion_score", "herd_behavior_score", "profit_driven_score"]].sum(axis=1)
+    agg["risk_aversion_w"] = agg["risk_aversion_score"] / agg["score_sum"]
+    agg["herd_behavior_w"] = agg["herd_behavior_score"] / agg["score_sum"]
+    agg["profit_driven_w"] = agg["profit_driven_score"] / agg["score_sum"]
+
+    out_cols = [
+        typ,
+        "profile_k",
+        "risk_aversion_w",
+        "herd_behavior_w",
+        "profit_driven_w",
+        "risk_aversion_score",
+        "herd_behavior_score",
+        "profit_driven_score",
+        "n_obs",
+    ]
+    out_df = agg[out_cols]
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.suffix.lower() == ".csv":
+        out_df.to_csv(out_path, index=False)
+    else:
+        out_df.to_parquet(out_path, index=False)
+
+    print(f"[ok] wrote {len(out_df)} rows -> {out_path}")
 
 
 if __name__ == "__main__":

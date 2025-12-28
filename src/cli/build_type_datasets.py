@@ -163,6 +163,15 @@ def _create_progress_bar(label: str, total: Optional[int]):
     return tqdm(total=total, desc=f"{label} (convert)")
 
 
+THINK_PLACEHOLDER = (
+    "<think>\n"
+    "[Using the investor profile constraints (risk_aversion, herd_behavior, profit_driven),\n"
+    "reason about how these preferences affect the interpretation of the current fundamentals\n"
+    "and justify the direction and magnitude of the log change over holding_t.]\n"
+    "</think>"
+)
+
+
 def _convert_prompts_to_sft(
     inp: Path,
     outp: Path,
@@ -189,6 +198,36 @@ def _convert_prompts_to_sft(
 
     _ensure_dir(outp)
     n = 0
+    # preload semantics maps (profile-level and type-level)
+    sem_map_profiles: dict[tuple[str, int], dict] = {}
+    sem_map_type: dict[str, dict] = {}
+    sem_path = Path("artifacts/features/profile_semantics_llm.json")
+    sem_type_path = Path("artifacts/features/type_profile_semantics.json")
+    try:
+        if sem_path.exists():
+            data = json.loads(sem_path.read_text(encoding="utf-8"))
+            for item in data:
+                pid = item.get("profile_id")
+                if not pid or "_p" not in pid:
+                    continue
+                tname, kstr = pid.rsplit("_p", 1)
+                try:
+                    k = int(kstr)
+                except Exception:
+                    continue
+                sem_map_profiles[(tname, k)] = item
+    except Exception as e:
+        print(f"[warn] failed to load profile semantics: {e}")
+    try:
+        if sem_type_path.exists():
+            data = json.loads(sem_type_path.read_text(encoding="utf-8"))
+            for item in data:
+                t = item.get("investor_type")
+                if not t:
+                    continue
+                sem_map_type[t] = item
+    except Exception as e:
+        print(f"[warn] failed to load type profile semantics: {e}")
     eff_progress = progress_every
     total_records = _estimate_total_records(inp, limit)
     pbar = _create_progress_bar(label, total_records)
@@ -205,13 +244,39 @@ def _convert_prompts_to_sft(
             if not prompt:
                 continue
             label_val = resolver(rec)
-            if label_val is None:
+            profile_val = rec.get("label_profile_k") or rec.get("profile_k")
+            if profile_val is None:
+                profile_val = 0  # default to single profile per type
+            if label_val is None or profile_val is None:
                 continue
 
             value = _format_float(float(label_val), decimals)
             resp_json = json.dumps({answer_key: value}, ensure_ascii=False)
             mgrno_val = rec.get("mgrno")
             system_content = _build_system_prompt(inv_type, mgrno_val) if inv_type else system
+            # inject profile_context using type/profile semantics if available
+            semantics_ctx = {}
+            if inv_type is not None:
+                semantics_ctx = sem_map_profiles.get((inv_type, int(profile_val)), {})
+                if not semantics_ctx:
+                    semantics_ctx = sem_map_type.get(inv_type, {})
+            if semantics_ctx:
+                ow_sem = semantics_ctx.get("objective_weights") or {}
+                # normalize keys to risk_aversion/herd_behavior/profit_driven
+                ow_norm = {
+                    "risk_aversion": ow_sem.get("risk_aversion") if "risk_aversion" in ow_sem else ow_sem.get("risk"),
+                    "herd_behavior": ow_sem.get("herd_behavior") if "herd_behavior" in ow_sem else ow_sem.get("tc"),
+                    "profit_driven": ow_sem.get("profit_driven") if "profit_driven" in ow_sem else ow_sem.get("alpha"),
+                }
+                ow_norm = {k: v for k, v in ow_norm.items() if v is not None}
+                ctx = {
+                    "profile_id": semantics_ctx.get("profile_id") or f"{inv_type}_p{int(profile_val)}",
+                    "profile_k": int(profile_val),
+                    "objective_weights": ow_norm if ow_norm else semantics_ctx.get("objective_weights"),
+                }
+                if "summary" in semantics_ctx:
+                    ctx["summary"] = semantics_ctx.get("summary")
+                prompt = "<profile_context>\n" + json.dumps(ctx, ensure_ascii=False) + "\n</profile_context>\n\n" + prompt
             msgs = [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": prompt},
@@ -222,36 +287,92 @@ def _convert_prompts_to_sft(
                 think_text = rec.get("think")
 
                 if not think_text:
-                    try:
-                        client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
-                        clean_prompt = re.split(r"OUTPUT FORMAT", prompt, maxsplit=1)[0].strip()
-                        ds_prompt = f"""
-                            You are an experienced quantitative portfolio manager.
-
-                            Below are historical fundamentals plus the true holding adjustment.
-                            Briefly explain in English why this label is reasonable. Highlight only the insights you find most relevant and keep it under 4 sentences.
-
-                            ---
-                            {clean_prompt}
-
-                            True label:
-                            holding_log_delta = {label_val:.4f}
-                            """
-                        resp_ds = client.chat.completions.create(
-                            model="deepseek-chat",
-                            messages=[
-                                {"role": "system", "content": "You are a financial reasoning assistant."},
-                                {"role": "user", "content": ds_prompt},
-                            ],
-                            temperature=0.7,
-                            max_tokens=200,
+                    if think_template:
+                        think_text = think_template
+                    else:
+                        # profile-conditioned prompt (no label leakage)
+                        profile_id = f"{inv_type}_p{int(profile_val)}" if inv_type is not None else None
+                        semantics_path = Path("artifacts/features/profile_semantics_llm.json")
+                        sem_map = {}
+                        sem_type_path = Path("artifacts/features/type_profile_semantics.json")
+                        sem_type_map = {}
+                        try:
+                            if semantics_path.exists():
+                                data = json.loads(semantics_path.read_text(encoding="utf-8"))
+                                for item in data:
+                                    pid = item.get("profile_id")
+                                    if pid:
+                                        sem_map[pid] = item
+                        except Exception as e:
+                            print(f"[warn] failed to load profile semantics: {e}")
+                        try:
+                            if sem_type_path.exists():
+                                data = json.loads(sem_type_path.read_text(encoding="utf-8"))
+                                for item in data:
+                                    t = item.get("investor_type")
+                                    if t:
+                                        sem_type_map[t] = item
+                        except Exception as e:
+                            print(f"[warn] failed to load type profile semantics: {e}")
+                        sem = sem_map.get(profile_id, {})
+                        if not sem and inv_type:
+                            sem = sem_type_map.get(inv_type, {})
+                        phi = sem.get("philosophy", {}) if isinstance(sem, dict) else {}
+                        cons = sem.get("constraints", {}) if isinstance(sem, dict) else {}
+                        obj = sem.get("objective_weights", {}) if isinstance(sem, dict) else {}
+                        # Normalize objective weights for description (prefer new schema; fallback to legacy keys)
+                        risk_pref = obj.get("risk_aversion")
+                        if risk_pref is None:
+                            risk_pref = obj.get("risk")
+                        herd_pref = obj.get("herd_behavior")
+                        if herd_pref is None:
+                            herd_pref = obj.get("tc")
+                        prof_pref = obj.get("profit_driven")
+                        if prof_pref is None:
+                            prof_pref = obj.get("alpha")
+                        profile_desc = (
+                            f"- Style: {phi.get('style','NA')}\n"
+                            f"- Activity: {phi.get('activity','NA')}\n"
+                            f"- Risk tolerance: {cons.get('risk_tolerance','NA')}\n"
+                            f"- Turnover preference: {cons.get('turnover_constraint','NA')}\n"
+                            f"- Objective emphasis: risk_aversion={risk_pref if risk_pref is not None else 'NA'}, "
+                            f"herd_behavior={herd_pref if herd_pref is not None else 'NA'}, "
+                            f"profit_driven={prof_pref if prof_pref is not None else 'NA'}\n"
                         )
-                        think_text = resp_ds.choices[0].message.content.strip()
-                        if not think_text.startswith("<think>"):
-                            think_text = f"<think>{think_text}</think>"
-                    except Exception as e:
-                        print(f"[WARN] DeepSeek generation failed: {e}")
-                        think_text = _build_auto_think(prompt, decimals)
+                        try:
+                            api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
+                            api_base = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+                            model_name = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+                            if not api_key:
+                                raise RuntimeError("Missing DEEPSEEK_API_KEY/OPENAI_API_KEY for DeepSeek generation.")
+                            client = OpenAI(api_key=api_key, base_url=api_base)
+                            clean_prompt = re.split(r"OUTPUT FORMAT", prompt, maxsplit=1)[0].strip()
+                            ds_prompt = f"""You are an experienced portfolio manager.
+
+You follow this investor profile:
+{profile_desc}
+
+Given the market and portfolio information below, briefly explain what considerations would guide a holding adjustment decision.
+Do NOT guess or mention any true labels. Focus on reasoning only (<=4 sentences).
+
+---
+{clean_prompt}
+"""
+                            resp_ds = client.chat.completions.create(
+                                model=model_name,
+                                messages=[
+                                    {"role": "system", "content": "You are a financial reasoning assistant."},
+                                    {"role": "user", "content": ds_prompt},
+                                ],
+                                temperature=0.7,
+                                max_tokens=200,
+                            )
+                            think_text = resp_ds.choices[0].message.content.strip()
+                            if not think_text.startswith("<think>"):
+                                think_text = f"<think>{think_text}</think>"
+                        except Exception as e:
+                            print(f"[WARN] DeepSeek generation failed: {e}")
+                            think_text = think_template or THINK_PLACEHOLDER
 
                 if think_text:
                     think_lower = think_text.lower()
@@ -267,9 +388,14 @@ def _convert_prompts_to_sft(
                 "loss": True,
             })
             out = {"messages": msgs}
+            # trim history_rows when curr_only to avoid carrying t-1.. data
+            if curr_only_prompt and "history_rows" in rec and isinstance(rec["history_rows"], dict):
+                rec = dict(rec)
+                rec["history_rows"] = {"t": rec["history_rows"].get("t")}
             meta_keys = [
-                "permno", "mgrno", "date", "holding_t",
+                "permno", "mgrno", "date", "holding_t", "shares",
                 "label_tp1", "label_log_delta", "label_delta_absolute", "history_rows",
+                "label_profile_k", "label_prev_profile_k", "objective_weights",
             ]
             for k in meta_keys:
                 if k in rec:
@@ -301,6 +427,38 @@ def _convert_prompts_to_grpo(
     progress_every: int = 100,
     curr_only_prompt: bool = False,
 ) -> int:
+    # 预加载 profile 语义表（用于 prompt 注入）
+    sem_path = Path("artifacts/features/profile_semantics_llm.json")
+    sem_map: dict[tuple[str, int], dict] = {}
+    # also load type-level semantics (one profile per type) if present
+    sem_type_path = Path("artifacts/features/type_profile_semantics.json")
+    sem_type_map: dict[str, dict] = {}
+    if sem_path.exists():
+        try:
+            data = json.loads(sem_path.read_text(encoding="utf-8"))
+            for item in data:
+                pid = item.get("profile_id")
+                if not pid or "_p" not in pid:
+                    continue
+                tname, kstr = pid.rsplit("_p", 1)
+                try:
+                    k = int(kstr)
+                except Exception:
+                    continue
+                sem_map[(tname, k)] = item
+        except Exception as e:
+            print(f"[warn] failed to load profile semantics: {e}")
+    if sem_type_path.exists():
+        try:
+            data = json.loads(sem_type_path.read_text(encoding="utf-8"))
+            for item in data:
+                t = item.get("investor_type")
+                if not t:
+                    continue
+                sem_type_map[t] = item
+        except Exception as e:
+            print(f"[warn] failed to load type profile semantics: {e}")
+
     _ensure_dir(outp)
     n = 0
     eff_progress = progress_every
@@ -320,6 +478,60 @@ def _convert_prompts_to_grpo(
                 continue
             mgrno_val = rec.get("mgrno")
             system_content = _build_system_prompt(inv_type, mgrno_val) if inv_type else system
+
+            # 取 profile_k 与语义，构造 profile_context 注入到 user prompt 顶部
+            prof_k = rec.get("label_profile_k") or rec.get("profile_k")
+            if prof_k is None:
+                prof_k = 0
+            prof_prev = rec.get("label_prev_profile_k")
+            obj_w = rec.get("objective_weights")
+            semantics = {}
+            # Try profile-level semantics first
+            if prof_k is not None and inv_type is not None:
+                semantics = sem_map.get((inv_type, int(prof_k)), {})
+                # 优先使用语义文件中的 objective_weights，确保与 profile 语义一致
+                obj = semantics.get("objective_weights") or {}
+                if obj:
+                    obj_w = {
+                        "alpha_w": obj.get("alpha"),
+                        "risk_w": obj.get("risk"),
+                        "tc_w": obj.get("tc"),
+                    }
+            # If no profile_k or missing semantics, fall back to type-level semantics (profile_k=0)
+            if (not semantics) and inv_type is not None:
+                sem_fallback = sem_type_map.get(inv_type)
+                if sem_fallback:
+                    semantics = sem_fallback
+                    obj = semantics.get("objective_weights") or {}
+                    if obj:
+                        obj_w = {
+                            "alpha_w": obj.get("risk_aversion"),
+                            "risk_w": obj.get("herd_behavior"),
+                            "tc_w": obj.get("profit_driven"),
+                        }
+                        prof_k = 0
+            profile_context = ""
+            if prof_k is not None:
+                # normalize objective weights keys to risk_aversion/herd_behavior/profit_driven for the prompt
+                ow_sem = obj_w or {}
+                ow_norm = {
+                    "risk_aversion": ow_sem.get("risk_aversion") if "risk_aversion" in ow_sem else ow_sem.get("alpha_w") or ow_sem.get("alpha"),
+                    "herd_behavior": ow_sem.get("herd_behavior") if "herd_behavior" in ow_sem else ow_sem.get("risk_w") or ow_sem.get("risk"),
+                    "profit_driven": ow_sem.get("profit_driven") if "profit_driven" in ow_sem else ow_sem.get("tc_w") or ow_sem.get("tc"),
+                }
+                ow_norm = {k: v for k, v in ow_norm.items() if v is not None}
+                ctx = {
+                    "profile_k": int(prof_k),
+                }
+                if ow_norm:
+                    ctx["objective_weights"] = ow_norm
+                # 附加语义（philosophy/constraints）用于条件化
+                if semantics:
+                    ctx["philosophy"] = semantics.get("philosophy", {})
+                    ctx["constraints"] = semantics.get("constraints", {})
+                profile_context = "<profile_context>\n" + json.dumps(ctx, ensure_ascii=False) + "\n</profile_context>\n\n"
+                prompt = profile_context + prompt
+
             messages = [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": prompt},
@@ -327,16 +539,26 @@ def _convert_prompts_to_grpo(
             if not no_think_example:
                 messages.append({
                     "role": "assistant",
-                    "content": "<think>\n[Analyze fundamental dynamics to derive the expected log change over holding_t.]\n</think>\n<answer>\n{\"holding_log_delta\": [predicted_value]}\n</answer>",
+                    # Use a profile-aware placeholder to guide reasoning without leaking labels.
+                    "content": f"{THINK_PLACEHOLDER}\n<answer>\n{{\"holding_log_delta\": 0.0}}\n</answer>",
                     "loss": False,
                 })
+            if curr_only_prompt and "history_rows" in rec and isinstance(rec["history_rows"], dict):
+                rec = dict(rec)
+                rec["history_rows"] = {"t": rec["history_rows"].get("t")}
             out = {
                 "messages": messages,
                 "label_delta": rec.get("label_delta"),
                 "label_tp1": rec.get("label_tp1") or rec.get("label"),
                 "holding_t": rec.get("holding_t"),
+                "shares": rec.get("shares"),
                 "mgrno": rec.get("mgrno"),
                 "permno": rec.get("permno"),
+                "label_profile_k": prof_k,
+                "label_prev_profile_k": prof_prev,
+                # reward/EMA-facing objective weights (model不可见)
+                "objective_weights_w": obj_w,
+                "profile_semantics": semantics,
             }
             fout.write(json.dumps(out, ensure_ascii=False) + "\n")
             n += 1
@@ -401,6 +623,11 @@ def main():
     ap.add_argument("--exclude-zero-holding-t", dest="exclude_zero", action="store_true")
     ap.add_argument("--include-zero-holding-t", dest="exclude_zero", action="store_false")
     ap.set_defaults(exclude_zero=True)
+    ap.add_argument("--profile-dir", type=str, default=None,
+                    help="Directory with *_iq_profile.(csv|parquet) per type (optional)")
+    ap.add_argument("--profile-weights-dir", type=str, default=None,
+                    help="Directory with *_profile_objective_weights.(csv|parquet) (optional)")
+    ap.add_argument("--random-sample", action="store_true", help="Use random sampling instead of stratified (pipeline).")
     # converter knobs
     ap.add_argument("--sft-with-think", dest="sft_with_think", action="store_true",
                     help="Force enabling <think> message in SFT data (default: enabled)")
@@ -516,6 +743,9 @@ def main():
         include_permnos=permno_filter,
         take_all=take_all_mode,
         limit_override=args.sft_limit,
+        profile_dir=Path(args.profile_dir) if args.profile_dir else None,
+        profile_weights_dir=Path(args.profile_weights_dir) if args.profile_weights_dir else None,
+        random_sample=args.random_sample,
     )
 
     print(f"[type-pipeline] building GRPO prompts for {t} ({args.grpo_start}..{args.grpo_end})")
@@ -537,6 +767,9 @@ def main():
         include_permnos=permno_filter,
         take_all=take_all_mode,
         limit_override=args.grpo_limit,
+        profile_dir=Path(args.profile_dir) if args.profile_dir else None,
+        profile_weights_dir=Path(args.profile_weights_dir) if args.profile_weights_dir else None,
+        random_sample=args.random_sample,
     )
 
     print(f"[type-pipeline] building TEST prompts for {t} (>= {args.test_start})")
@@ -558,6 +791,9 @@ def main():
         include_permnos=test_permno_filter or permno_filter,
         take_all=take_all_mode_test,
         limit_override=args.test_limit,
+        profile_dir=Path(args.profile_dir) if args.profile_dir else None,
+        profile_weights_dir=Path(args.profile_weights_dir) if args.profile_weights_dir else None,
+        random_sample=args.random_sample,
     )
 
     # 2) Convert
@@ -587,9 +823,10 @@ def main():
         sft_test_out,
         system=system_prompt,
         inv_type=t,
-        with_think=False,
+        with_think=True,
         contract_mode="absolute",
         decimals=args.sft_decimals,
+        think_template=THINK_PLACEHOLDER,
         label=f"test_chat_{t}",
         progress_every=100,
         curr_only_prompt=args.prompt_curr_only,

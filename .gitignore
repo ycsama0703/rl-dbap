@@ -37,3 +37,6 @@ __pycache__/
 env/
 checkpoints/
 
+artifacts/test/*.jsonl
+artifacts/test/*.jsonl # 或更精细忽略
+artifacts/test/*.jsonl

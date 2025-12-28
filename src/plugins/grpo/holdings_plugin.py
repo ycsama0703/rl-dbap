@@ -417,3 +417,130 @@ class HuberHoldingsORM(ORM):
 
 orms["huber_holdings"] = HuberHoldingsORM
 
+
+# ============================
+# Profile–Reasoning Alignment Reward
+# ============================
+class ProfileAlignmentORM(ORM):
+    """
+    Reward that enforces alignment between:
+      - profile objective weights (alpha / risk / tc)
+      - reasoning content inside <think>...</think>
+
+    Intuition:
+      If a profile emphasizes transaction cost (tc),
+      the reasoning should mention cost / turnover / trading.
+      If a profile emphasizes risk,
+      the reasoning should mention risk / beta / volatility.
+      If a profile emphasizes alpha,
+      the reasoning should mention return / opportunity / fundamentals.
+
+    Reward ∈ [-1, 1]
+    """
+
+    # keyword lexicons (lightweight, extensible)
+    ALPHA_TERMS = [
+        "alpha", "return", "excess", "opportunity", "profit", "fundamental",
+        "growth", "valuation", "undervalued", "expected"
+    ]
+    RISK_TERMS = [
+        "risk", "beta", "volatility", "drawdown", "uncertainty",
+        "defensive", "stability", "exposure"
+    ]
+    TC_TERMS = [
+        "transaction", "cost", "turnover", "trading", "rebalance",
+        "liquidity", "friction"
+    ]
+
+    def __call__(
+        self,
+        completions,
+        objective_weights=None,
+        **kwargs
+    ) -> List[float]:
+        """
+        Args:
+            completions: model outputs (strings)
+            objective_weights: dict or list of dicts
+                {
+                  "alpha_w": float,
+                  "risk_w": float,
+                  "tc_w": float
+                }
+        """
+
+        # broadcast weights if needed
+        if not isinstance(objective_weights, list):
+            objective_weights = [objective_weights] * len(completions)
+
+        rewards: List[float] = []
+
+        for comp, ow in zip(completions, objective_weights):
+            try:
+                if comp is None or ow is None:
+                    rewards.append(-1.0)
+                    continue
+
+                # -------- extract <think> content --------
+                m = THINK_CONTENT_RE.search(comp)
+                if not m:
+                    rewards.append(-1.0)
+                    continue
+
+                think = m.group(1).lower()
+                if not think.strip():
+                    rewards.append(-1.0)
+                    continue
+
+                # -------- count keyword hits --------
+                def _count_hits(terms):
+                    return sum(1 for t in terms if t in think)
+
+                alpha_hits = _count_hits(self.ALPHA_TERMS)
+                risk_hits = _count_hits(self.RISK_TERMS)
+                tc_hits = _count_hits(self.TC_TERMS)
+
+                total_hits = alpha_hits + risk_hits + tc_hits
+                if total_hits == 0:
+                    # reasoning contains no economic content
+                    rewards.append(-0.5)
+                    continue
+
+                # normalize reasoning focus
+                alpha_frac = alpha_hits / total_hits
+                risk_frac = risk_hits / total_hits
+                tc_frac = tc_hits / total_hits
+
+                # -------- objective weights --------
+                w_alpha = float(ow.get("alpha_w", 0.0))
+                w_risk = float(ow.get("risk_w", 0.0))
+                w_tc = float(ow.get("tc_w", 0.0))
+
+                w_sum = w_alpha + w_risk + w_tc
+                if w_sum <= 0:
+                    rewards.append(0.0)
+                    continue
+
+                w_alpha /= w_sum
+                w_risk /= w_sum
+                w_tc /= w_sum
+
+                # -------- alignment score --------
+                alignment = (
+                    w_alpha * alpha_frac +
+                    w_risk * risk_frac +
+                    w_tc * tc_frac
+                )
+
+                # map to [-1, 1]
+                reward = 2.0 * alignment - 1.0
+                rewards.append(float(reward))
+
+            except Exception:
+                rewards.append(-1.0)
+
+        return rewards
+
+
+# register for GRPO
+orms["profile_alignment"] = ProfileAlignmentORM

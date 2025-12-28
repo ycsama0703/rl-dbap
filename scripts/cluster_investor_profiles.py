@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Stage 2: cluster investor-quarter profiles (per investor_type).
+Stage 2: cluster investor-level profiles (per investor_type) and broadcast to all quarters.
 
 Input: investor_quarter_features (from build_investor_quarter_features.py)
 Output: investor_quarter_profile with profile_k, plus cluster centers JSON.
@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
         "--features",
         nargs="*",
         default=["exp_be", "exp_profit", "exp_gat", "exp_beta", "bm_gap", "turnover", "hhi", "n_pos"],
-        help="Feature columns to cluster on (winsor/zscore 已在 Stage1 完成).",
+        help="Feature columns to cluster on (winsor/zscore 已在 Stage1 完成). 聚类先按投资者取时间均值，再广播到所有季度。",
     )
     return ap.parse_args()
 
@@ -69,12 +69,17 @@ def main() -> None:
     outputs = []
     centers = {}
     for tval, g in df.groupby(typ, sort=False):
-        X = g[feats].fillna(0.0).to_numpy(dtype=np.float32)
+        # Aggregate features per investor across time to get a stable profile
+        agg = g.groupby(inv, as_index=False)[feats].mean()
+        X = agg[feats].fillna(0.0).to_numpy(dtype=np.float32)
         km = KMeans(n_clusters=args.n_clusters, random_state=args.random_state, n_init="auto")
         labels = km.fit_predict(X)
         centers[str(tval)] = km.cluster_centers_.tolist()
+        inv_labels = agg[[inv]].copy()
+        inv_labels["profile_k"] = labels
+        # broadcast profile_k back to all quarters for that investor
         out_g = g[[inv, typ, qtr]].copy()
-        out_g["profile_k"] = labels
+        out_g = out_g.merge(inv_labels, on=inv, how="left")
         outputs.append(out_g)
 
     out_df = pd.concat(outputs, axis=0, ignore_index=True)
