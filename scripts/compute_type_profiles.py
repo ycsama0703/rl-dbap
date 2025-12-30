@@ -41,8 +41,8 @@ import pyarrow.parquet as pq
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compute per-type profiles (risk / herd / profit weights).")
     p.add_argument("--panel-dir", required=True, help="Directory with per-type parquet files.")
-    p.add_argument("--vix-path", default="data/VIXCLS.csv")
-    p.add_argument("--volume-path", default="data/sp500_market_volume.csv")
+    p.add_argument("--stock-daily-path", default="data/stock_daily.parquet",
+                   help="Parquet with columns permno,ticker,date,AdjClose/Close,Volume.")
     p.add_argument("--out-path", default="artifacts/features/type_profiles.csv")
     p.add_argument("--eps", type=float, default=1e-9)
     return p.parse_args()
@@ -67,38 +67,43 @@ def _read_with_date(path: Path) -> pd.DataFrame:
 
 
 # ------------------------------------------------------------
-# Market data: daily → quarterly (prev quarter aligned)
+# Stock-level daily → quarterly (prev quarter aligned)
 # ------------------------------------------------------------
-def load_market_quarterly(vix_path: Path, vol_path: Path) -> pd.DataFrame:
-    vix = _read_with_date(vix_path)
-    vol = _read_with_date(vol_path)
+def load_stock_quarterly(daily_path: Path, eps: float) -> pd.DataFrame:
+    """Aggregate per-permno daily price/volume to prev-quarter metrics."""
+    df = pd.read_parquet(daily_path)
+    df = df.rename(columns={"adjclose": "AdjClose", "close": "Close", "volume": "Volume"})
+    # prefer AdjClose if available
+    price_col = "AdjClose" if "AdjClose" in df.columns else "Close"
+    if price_col not in df.columns or "Volume" not in df.columns:
+        raise ValueError("stock daily data must contain price (AdjClose/Close) and Volume")
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.dropna(subset=["permno", price_col, "Volume"])
 
-    if "vixcls" in vix.columns and "vix" not in vix.columns:
-        vix = vix.rename(columns={"vixcls": "vix"})
-    if "vix" not in vix.columns:
-        raise ValueError("VIX file must contain vix or vixcls")
+    # compute daily log returns per permno
+    df = df.sort_values(["permno", "date"])
+    df["ret"] = df.groupby("permno")[price_col].transform(lambda s: (s / s.shift(1)).pipe(np.log))
 
-    if "ln_market_volume" not in vol.columns:
-        raise ValueError("Volume file must contain ln_market_volume")
+    # assign quarter start
+    df["quarter_start"] = pd.PeriodIndex(df["date"], freq="Q").to_timestamp(how="start")
 
-    def to_qstart(df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
-        df["quarter_start"] = pd.PeriodIndex(df["date"], freq="Q").to_timestamp(how="start")
-        return df
-
-    vix = to_qstart(vix)
-    vol = to_qstart(vol)
-
-    vix_q = vix.groupby("quarter_start", as_index=False)["vix"].mean()
-    vol_q = vol.groupby("quarter_start", as_index=False)["ln_market_volume"].mean()
-
+    # aggregate per permno, quarter_start using prev-quarter window
+    agg = (
+        df.groupby(["permno", "quarter_start"], as_index=False)
+        .agg(
+            ret_std=("ret", lambda x: x.dropna().std() * np.sqrt(252)),
+            ln_vol=("Volume", lambda x: np.log(x).mean() if len(x) > 0 else np.nan),
+        )
+    )
     # shift forward one quarter: (t-1) → t
     shift = pd.offsets.QuarterBegin(startingMonth=1)
-    vix_q["date"] = vix_q["quarter_start"] + shift
-    vol_q["date"] = vol_q["quarter_start"] + shift
+    agg["date"] = agg["quarter_start"] + shift
 
-    market = vix_q.merge(vol_q, on="date", how="outer")
-    return market[["date", "vix", "ln_market_volume"]]
+    agg = agg.rename(columns={"ret_std": "stock_vol_q_prev", "ln_vol": "stock_ln_volume_q_prev"})
+    # replace zeros/negatives with eps guard
+    agg["stock_vol_q_prev"] = agg["stock_vol_q_prev"].fillna(eps)
+    agg["stock_ln_volume_q_prev"] = agg["stock_ln_volume_q_prev"].fillna(eps)
+    return agg[["permno", "date", "stock_vol_q_prev", "stock_ln_volume_q_prev"]]
 
 
 # ------------------------------------------------------------
@@ -129,8 +134,8 @@ def main():
     args = parse_args()
     eps = args.eps
 
-    # market (quarterly, aligned)
-    market = load_market_quarterly(Path(args.vix_path), Path(args.volume_path))
+    # stock-level quarterly aggregates
+    market = load_stock_quarterly(Path(args.stock_daily_path), eps)
 
     # panel
     panel = pd.concat(load_panel_frames(Path(args.panel_dir)), ignore_index=True)
@@ -142,19 +147,19 @@ def main():
     panel["delta_log"] = np.log(panel["holding_t1"]) - np.log(panel["holding_t"])
     panel = panel.replace([np.inf, -np.inf], np.nan).dropna(subset=["delta_log"])
 
-    # merge market
-    panel = panel.merge(market, on="date", how="left")
-    panel = panel.dropna(subset=["vix", "ln_market_volume"])
+    # merge stock-level market features
+    panel = panel.merge(market, on=["permno", "date"], how="left")
+    panel = panel.dropna(subset=["stock_vol_q_prev", "stock_ln_volume_q_prev"])
 
-    # ratios for risk / herd (magnitude-based)
+    # ratios for risk / herd (stock-level denominators)
     abs_delta = panel["delta_log"].abs()
-    panel["risk_ratio"] = abs_delta / np.maximum(panel["vix"].abs(), eps)
-    panel["herd_ratio"] = abs_delta / np.maximum(panel["ln_market_volume"].abs(), eps)
+    panel["risk_ratio"] = abs_delta / np.maximum(panel["stock_vol_q_prev"].abs(), eps)
+    panel["herd_ratio"] = abs_delta / np.maximum(panel["stock_ln_volume_q_prev"].abs(), eps)
 
-    # ⭐ PROFIT-DRIVEN (scheme A): directional + signal-aligned
+    # ⭐ PROFIT-DRIVEN (stock-level): delta_log scaled by profit
     if "profit" not in panel.columns:
-        raise ValueError("panel must contain profit column for profit_driven (scheme A)")
-    panel["profit_align"] = np.sign(panel["delta_log"]) * panel["profit"]
+        raise ValueError("panel must contain profit column for profit_driven (scheme stock)")
+    panel["profit_align"] = panel["delta_log"] / np.maximum(panel["profit"].abs(), eps)
 
     # aggregate by type
     agg = (

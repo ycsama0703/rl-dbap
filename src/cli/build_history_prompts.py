@@ -34,6 +34,8 @@ def _row_from_dfrow(r: pd.Series) -> PromptRow:
         ),
         holding_t=r.get("holding_t"),
         holding_t1=r.get("holding_t1"),
+        stock_vol_q_prev=r.get("stock_vol_q_prev"),
+        stock_ln_volume_q_prev=r.get("stock_ln_volume_q_prev"),
         shares=r.get("shares"),
         me=r.get("me") or r.get("factor1"),
         be=r.get("be") or r.get("factor2"),
@@ -392,6 +394,14 @@ def build_for_file(
                     pp = cur_row.get("prev_profile_k")
                     if pd.notna(pp):
                         extras["prev_profile_k"] = int(pp)
+                if "stock_vol_q_prev" in cur_row:
+                    sv = cur_row.get("stock_vol_q_prev")
+                    if pd.notna(sv):
+                        extras["stock_vol_q_prev"] = float(sv)
+                if "stock_ln_volume_q_prev" in cur_row:
+                    slv = cur_row.get("stock_ln_volume_q_prev")
+                    if pd.notna(slv):
+                        extras["stock_ln_volume_q_prev"] = float(slv)
                 if {"alpha_w", "risk_w", "tc_w", "te_w"}.issubset(df.columns):
                     aw = cur_row.get("alpha_w")
                     rw = cur_row.get("risk_w")

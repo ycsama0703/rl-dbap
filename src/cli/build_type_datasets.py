@@ -58,7 +58,9 @@ def _format_row_for_prompt(row: dict | None) -> str:
             "# Benchmark reference: the stock’s weight in the S&P500 indicating relative market importance.\n"
             "spx_weight=NA\n\n"
             "# Current position: the fund’s existing exposure to the stock.\n"
-            "holding=NA, price=NA"
+            "holding=NA, price=NA\n\n"
+            "# Stock-level market aggregates (prev quarter).\n"
+            "stock_vol_q_prev=NA, stock_ln_volume_q_prev=NA"
         )
 
     def _get(key: str) -> str:
@@ -77,6 +79,9 @@ def _format_row_for_prompt(row: dict | None) -> str:
         "",
         "# Current position: the fund’s existing exposure to the stock.",
         f"holding={_get('holding')}, price={_get('price')}",
+        "",
+        "# Stock-level market aggregates (prev quarter).",
+        f"stock_vol_q_prev={_get('stock_vol_q_prev')}, stock_ln_volume_q_prev={_get('stock_ln_volume_q_prev')}",
     ]
     return "\n".join(parts)
 
@@ -260,7 +265,6 @@ def _convert_prompts_to_sft(
                 profile_val = 0  # default to single profile per type
             if label_val is None or profile_val is None:
                 continue
-
             value = _format_float(float(label_val), decimals)
             resp_json = json.dumps({answer_key: value}, ensure_ascii=False)
             mgrno_val = rec.get("mgrno")
@@ -282,9 +286,13 @@ def _convert_prompts_to_sft(
                 ow_norm = {k: v for k, v in ow_norm.items() if v is not None}
                 ctx = {
                     "profile_id": semantics_ctx.get("profile_id") or f"{inv_type}_p{int(profile_val)}",
-                    "profile_k": int(profile_val),
                     "objective_weights": ow_norm if ow_norm else semantics_ctx.get("objective_weights"),
                 }
+                # include philosophy/constraints if present
+                if "philosophy" in semantics_ctx:
+                    ctx["philosophy"] = semantics_ctx.get("philosophy")
+                if "constraints" in semantics_ctx:
+                    ctx["constraints"] = semantics_ctx.get("constraints")
                 if "summary" in semantics_ctx:
                     ctx["summary"] = semantics_ctx.get("summary")
                 prompt = "<profile_context>\n" + json.dumps(ctx, ensure_ascii=False) + "\n</profile_context>\n\n" + prompt
@@ -406,8 +414,6 @@ Do NOT guess or mention any true labels. Focus on reasoning only (<=4 sentences)
             meta_keys = [
                 "permno", "mgrno", "date", "holding_t", "shares",
                 "label_tp1", "label_log_delta", "label_delta_absolute", "history_rows",
-                "vix_q_prev", "ln_market_volume_q_prev",
-                "label_profile_k", "label_prev_profile_k", "objective_weights",
             ]
             for k in meta_keys:
                 if k in rec:
@@ -532,9 +538,7 @@ def _convert_prompts_to_grpo(
                     "profit_driven": ow_sem.get("profit_driven") if "profit_driven" in ow_sem else ow_sem.get("tc_w") or ow_sem.get("tc"),
                 }
                 ow_norm = {k: v for k, v in ow_norm.items() if v is not None}
-                ctx = {
-                    "profile_k": int(prof_k),
-                }
+                ctx = {}
                 if ow_norm:
                     ctx["objective_weights"] = ow_norm
                 # 附加语义（philosophy/constraints）用于条件化
@@ -560,18 +564,13 @@ def _convert_prompts_to_grpo(
                 rec["history_rows"] = {"t": rec["history_rows"].get("t")}
             out = {
                 "messages": messages,
-                "label_delta": rec.get("label_delta"),
+                "holding_log_delta": rec.get("holding_log_delta"),
                 "label_tp1": rec.get("label_tp1") or rec.get("label"),
                 "holding_t": rec.get("holding_t"),
                 "shares": rec.get("shares"),
                 "mgrno": rec.get("mgrno"),
                 "permno": rec.get("permno"),
-                "vix_q_prev": rec.get("vix_q_prev"),
-                "ln_market_volume_q_prev": rec.get("ln_market_volume_q_prev"),
-                "label_profile_k": prof_k,
-                "label_prev_profile_k": prof_prev,
                 # reward/EMA-facing objective weights (model不可见)
-                "objective_weights_w": obj_w,
                 "profile_semantics": semantics,
             }
             fout.write(json.dumps(out, ensure_ascii=False) + "\n")

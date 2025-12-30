@@ -164,6 +164,9 @@ class HoldingsDeltaORM(ORM):
         robust_mode = str(kwargs.get('robust_mode', 'ema'))  # 'ema', 'mad', 'iqr'
 
         rewards: List[float] = []
+        # allow holding_log_delta alias
+        if label_delta is None and "holding_log_delta" in kwargs:
+            label_delta = kwargs.get("holding_log_delta")
         if not isinstance(label_delta, list):
             label_delta = [label_delta] * len(completions)
         if not isinstance(label_tp1, list):
@@ -178,7 +181,9 @@ class HoldingsDeltaORM(ORM):
             try:
                 obj = _extract_json_from_answer(comp)
                 if isinstance(obj, dict):
-                    if obj.get('holding_delta') is not None:
+                    if obj.get('holding_log_delta') is not None:
+                        pred = float(obj['holding_log_delta'])
+                    elif obj.get('holding_delta') is not None:
                         pred = float(obj['holding_delta'])
             except Exception:
                 pred = None
@@ -254,6 +259,8 @@ class DirectionHoldingsORM(ORM):
     """Reward measuring directional alignment with optional soft weighting."""
 
     def __call__(self, completions, label_delta=None, **kwargs) -> List[float]:
+        if label_delta is None and "holding_log_delta" in kwargs:
+            label_delta = kwargs.get("holding_log_delta")
         if not isinstance(label_delta, list):
             label_delta = [label_delta] * len(completions)
 
@@ -303,6 +310,8 @@ class MagnitudeHoldingsORM(ORM):
     """Reward for magnitude closeness; maps absolute error to [-1, 1]."""
 
     def __call__(self, completions, label_delta=None, **kwargs) -> List[float]:
+        if label_delta is None and "holding_log_delta" in kwargs:
+            label_delta = kwargs.get("holding_log_delta")
         if not isinstance(label_delta, list):
             label_delta = [label_delta] * len(completions)
 
@@ -542,6 +551,3 @@ class ProfileNumericDeviationORM(ORM):
 
 
 orms["profile_numeric_deviation"] = ProfileNumericDeviationORM
-
-
-

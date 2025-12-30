@@ -17,6 +17,8 @@ class PromptRow:
     profile_k: Optional[int] = None
     prev_profile_k: Optional[int] = None
     objective_weights: Optional[dict] = None
+    stock_vol_q_prev: Optional[float] = None
+    stock_ln_volume_q_prev: Optional[float] = None
     shares: Optional[float] = None
     me: Optional[float] = None
     be: Optional[float] = None
@@ -79,6 +81,8 @@ def _row_payload(r: PromptRow) -> dict[str, str]:
         "holding": _fmt_or_na(r.holding_t),
         "price": _fmt_or_na(r.prc),
         "sp500_weight": _fmt_or_na(r.sp500_weight),
+        "stock_vol_q_prev": _fmt_or_na(r.stock_vol_q_prev),
+        "stock_ln_volume_q_prev": _fmt_or_na(r.stock_ln_volume_q_prev),
     }
 
 
@@ -197,8 +201,7 @@ def build_history_prompt(
         "label_profile_k": r_t.profile_k,
         "label_prev_profile_k": r_t.prev_profile_k,
         "objective_weights": r_t.objective_weights,
-        "label_delta": None,
-        "label_log_delta": None,
+        "holding_log_delta": None,
         "label_delta_absolute": None,
         "history_rows": history_dict,
         "ticker": str(permno) if permno is not None else None,
@@ -211,11 +214,9 @@ def build_history_prompt(
             extras["label_delta_absolute"] = tp1 - ht
             if ht >= 0 and tp1 >= 0:
                 log_delta = math.log((tp1 + LOG_EPS) / (ht + LOG_EPS))
-                extras["label_log_delta"] = log_delta
-                extras["label_delta"] = log_delta
+                extras["holding_log_delta"] = log_delta
         except Exception:
-            extras["label_delta"] = None
-            extras["label_log_delta"] = None
+            extras["holding_log_delta"] = None
             extras["label_delta_absolute"] = None
 
     return prompt, extras
