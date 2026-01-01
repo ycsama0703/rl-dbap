@@ -1,5 +1,5 @@
 from __future__ import annotations
-import argparse, json
+import argparse, json, math
 from pathlib import Path
 from typing import Optional
 import pandas as pd
@@ -564,15 +564,36 @@ def _convert_prompts_to_grpo(
                 rec["history_rows"] = {"t": rec["history_rows"].get("t")}
             out = {
                 "messages": messages,
-                "holding_log_delta": rec.get("holding_log_delta"),
-                "label_tp1": rec.get("label_tp1") or rec.get("label"),
-                "holding_t": rec.get("holding_t"),
+            }
+            # 计算/填充标签
+            ht = rec.get("holding_t")
+            tp1 = rec.get("label_tp1") or rec.get("label")
+            hld = rec.get("holding_log_delta")
+            if hld is None and ht is not None and tp1 is not None:
+                try:
+                    hld = math.log((float(tp1) + 1e-6) / (float(ht) + 1e-6))
+                except Exception:
+                    hld = None
+
+            out.update({
+                "holding_log_delta": hld,
+                "label_delta": hld,
+                "label_tp1": tp1,
+                "holding_t": ht,
                 "shares": rec.get("shares"),
                 "mgrno": rec.get("mgrno"),
                 "permno": rec.get("permno"),
+                "date": rec.get("date"),
+                "history_rows": rec.get("history_rows"),
+                # 市场聚合
+                "vix_q_prev": rec.get("vix_q_prev"),
+                "ln_market_volume_q_prev": rec.get("ln_market_volume_q_prev"),
+                # 个股聚合
+                "stock_vol_q_prev": rec.get("stock_vol_q_prev"),
+                "stock_ln_volume_q_prev": rec.get("stock_ln_volume_q_prev"),
                 # reward/EMA-facing objective weights (model不可见)
                 "profile_semantics": semantics,
-            }
+            })
             fout.write(json.dumps(out, ensure_ascii=False) + "\n")
             n += 1
             if pbar is not None:
